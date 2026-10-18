@@ -121,7 +121,8 @@ request:
 |---|---|
 | Frontend | Types, the bundle and the Vitest tests |
 | Windows | The whole app in Release, with the frontend built in, every test, and the ZIP package. The app's files are kept as the `nethack-tiles-windows` artifact for 14 days: unzip it and run `nethack_tiles.exe`. |
-| Core (Linux, macOS) | The libraries, tools and tests, with `-DNH_BUILD_APP=OFF` |
+| Linux (app and core) | The whole app with WebKitGTK, the tools and the tests |
+| Core (macOS) | The libraries, tools and tests, with `-DNH_BUILD_APP=OFF` |
 
 `NH_BUILD_APP=OFF` builds everything except the app itself. Use it where
 the system webview's development files are missing, such as Linux without

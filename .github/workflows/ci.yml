@@ -73,20 +73,34 @@ jobs:
           path: nethack-tiles-windows
           retention-days: 14
 
-  # Linux and macOS build the libraries, the tools and the tests. The app is
-  # off: on Linux it needs WebKitGTK, and on both the keychain and the folder
-  # picker are not ported yet. This shows that the rest compiles and passes.
-  core:
-    name: Core (${{ matrix.os }})
+  # Linux builds the whole app with WebKitGTK, plus the tools and tests.
+  # macOS builds the libraries, tools and tests only: its app cannot serve
+  # the page from disk yet. Both leave the frontend to its own job.
+  unix:
+    name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-latest]
+        include:
+          - name: Linux (app and core)
+            os: ubuntu-24.04
+            app: "ON"
+          - name: Core (macos-latest)
+            os: macos-latest
+            app: "OFF"
     steps:
       - uses: actions/checkout@v5
+      # The same packages the Rust app's CI installs for its Linux build.
+      - name: WebKitGTK development files
+        if: matrix.app == 'ON'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNH_BUILD_APP=OFF
+        run: >
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          -DNH_BUILD_APP=${{ matrix.app }} -DNH_BUILD_FRONTEND=OFF
       - name: Build
         run: cmake --build build --parallel
       - name: Tests

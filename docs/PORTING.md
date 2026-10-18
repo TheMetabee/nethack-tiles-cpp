@@ -58,10 +58,10 @@ Proven end to end in the spike (Windows):
   `WEBKIT_DISABLE_DMABUF_RENDERER=1` (WSL has no GPU buffer sharing; without
   it the window stays blank), and start the app detached with `setsid`, or
   WebKit's page process ends with the WSL command and the window freezes.
-- CI (`.github/workflows/ci.yml`): the frontend, the whole app on Windows,
-  and the libraries and tests on Linux and macOS. The Linux job was run in
-  WSL Ubuntu 24.04 (GCC 13.3) first: 213 cases pass, the 219 less the six
-  Credential Manager cases. All four jobs pass on GitHub, macOS included.
+- CI (`.github/workflows/ci.yml`): the frontend, the whole app on Windows
+  and Linux, and the libraries and tests on macOS. The Linux build was run in
+  WSL Ubuntu 24.04 (GCC 13.3) first. All four jobs pass on GitHub, macOS
+  included.
 - Packaging (Windows): `cpack` makes a ZIP with only the app, its licence
   and `THIRD_PARTY_NOTICES.txt` (from `cmake/notices.cmake`). The Release
   exe has the icon and version details, no console window and no browser
