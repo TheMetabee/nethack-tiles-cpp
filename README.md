@@ -44,6 +44,21 @@ To inspect the page, set `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` to
 `--remote-debugging-port=9222` before starting the app, then open
 `edge://inspect` or `chrome://inspect`.
 
+## CI
+
+`.github/workflows/ci.yml` runs on every push to `main` and every pull
+request:
+
+| Job | What it checks |
+|---|---|
+| Frontend | Types, the bundle and the Vitest tests |
+| Windows | The whole app in Release, with the frontend built in, and every test. The build is kept as the `nethack-tiles-windows` artifact for 14 days: unzip it and run `nethack_tiles.exe`. |
+| Core (Linux, macOS) | The libraries, tools and tests, with `-DNH_BUILD_APP=OFF` |
+
+`NH_BUILD_APP=OFF` builds everything except the app itself. Use it where
+the system webview's development files are missing, such as Linux without
+WebKitGTK.
+
 ## Layout
 
 | Path | Contents |

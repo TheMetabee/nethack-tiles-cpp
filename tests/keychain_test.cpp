@@ -10,6 +10,7 @@
 
 using namespace nh;
 
+#ifdef _WIN32
 namespace {
 
 // Unique per run, so two runs at once cannot see each other's entries.
@@ -21,6 +22,7 @@ std::string test_service() {
 }
 
 }  // namespace
+#endif
 
 TEST_CASE("the target name is the one the rust keyring crate makes") {
   // windows-native-keyring-store `Store::new()`: "<user>.<service>".

@@ -7,19 +7,26 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 include(FetchContent)
 
+# The app needs the system webview's development files: WebView2 comes with
+# the build on Windows, but Linux needs WebKitGTK installed. Turn this off to
+# build only the libraries, tests and tools, as CI does on Linux and macOS.
+option(NH_BUILD_APP "Build the app itself, not only its libraries and tests" ON)
+
 # --- Dependencies, each pinned to a release tag -----------------------------
 
 # The window and the system webview that hosts the frontend: WebView2 on
 # Windows, WKWebView on macOS, WebKitGTK on Linux.
-set(WEBVIEW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(WEBVIEW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(WEBVIEW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
-set(WEBVIEW_ENABLE_PACKAGING OFF CACHE BOOL "" FORCE)
-FetchContent_Declare(webview
-  GIT_REPOSITORY https://github.com/webview/webview.git
-  GIT_TAG 0.12.0
-  GIT_SHALLOW TRUE)
-FetchContent_MakeAvailable(webview)
+if(NH_BUILD_APP)
+  set(WEBVIEW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+  set(WEBVIEW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  set(WEBVIEW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
+  set(WEBVIEW_ENABLE_PACKAGING OFF CACHE BOOL "" FORCE)
+  FetchContent_Declare(webview
+    GIT_REPOSITORY https://github.com/webview/webview.git
+    GIT_TAG 0.12.0
+    GIT_SHALLOW TRUE)
+  FetchContent_MakeAvailable(webview)
+endif()
 
 FetchContent_Declare(json
   URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
@@ -146,6 +153,8 @@ endif()
 
 # --- App: hosts the frontend and answers its commands -----------------------
 
+if(NH_BUILD_APP)
+
 add_executable(nethack_tiles
   src/app/main.cpp
   src/app/bridge.cpp)
@@ -200,6 +209,8 @@ if(NH_BUILD_FRONTEND)
     VERBATIM)
 endif()
 
+endif()  # NH_BUILD_APP
+
 # --- Developer tools --------------------------------------------------------
 
 # Builds a tile sheet from NetHack's win/share/*.txt files. It is not part of
@@ -208,6 +219,8 @@ add_executable(tiles2png tools/tiles2png.cpp)
 target_link_libraries(tiles2png PRIVATE nethack_core)
 if(MSVC)
   target_compile_options(tiles2png PRIVATE /W4 /permissive- /utf-8)
+else()
+  target_compile_options(tiles2png PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 # --- Tests ------------------------------------------------------------------
@@ -230,6 +243,8 @@ add_executable(core_tests
 target_link_libraries(core_tests PRIVATE nethack_core nethack_net doctest::doctest_with_main)
 if(MSVC)
   target_compile_options(core_tests PRIVATE /W4 /permissive- /utf-8)
+else()
+  target_compile_options(core_tests PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 if(WIN32)
   add_custom_command(TARGET core_tests POST_BUILD

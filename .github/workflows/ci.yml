@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A new push to a branch makes the run already in flight pointless.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+        with:
+          # The version comes from its `packageManager` field.
+          package_json_file: frontend/package.json
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Types and bundle
+        run: pnpm run build
+      - name: Tests
+        run: pnpm test
+
+  # The whole app, as it ships: the frontend built in, served from disk.
+  windows:
+    name: Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/package.json
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      # The CMake build runs `pnpm run build`, which needs the packages.
+      - run: pnpm install --frozen-lockfile
+        working-directory: frontend
+
+      - name: Configure
+        run: cmake -S . -B build -A x64
+      - name: Build
+        run: cmake --build build --config Release --parallel
+      - name: Tests
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      # A build to try from any push: unzip it and run nethack_tiles.exe.
+      - name: Collect the app
+        shell: pwsh
+        run: |
+          $out = "nethack-tiles-windows"
+          New-Item -ItemType Directory $out | Out-Null
+          Copy-Item build/Release/nethack_tiles.exe, build/Release/ssh.dll $out
+          Copy-Item -Recurse build/Release/assets, build/Release/frontend $out
+          Copy-Item LICENSE $out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nethack-tiles-windows
+          path: nethack-tiles-windows
+          retention-days: 14
+
+  # Linux and macOS build the libraries, the tools and the tests. The app is
+  # off: on Linux it needs WebKitGTK, and on both the keychain and the folder
+  # picker are not ported yet. This shows that the rest compiles and passes.
+  core:
+    name: Core (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-latest]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DNH_BUILD_APP=OFF
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Tests
+        run: ctest --test-dir build --output-on-failure

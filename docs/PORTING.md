@@ -47,6 +47,10 @@ Proven end to end in the spike (Windows):
   checked end to end: the frontend writes its files through C++ into a
   directory with a non-ASCII name.
 - Native folder picker (Windows) and opening links in the browser.
+- CI (`.github/workflows/ci.yml`): the frontend, the whole app on Windows,
+  and the libraries and tests on Linux and macOS. The Linux job was run in
+  WSL Ubuntu 24.04 (GCC 13.3) first: 213 cases pass, the 219 less the six
+  Credential Manager cases. macOS is not checked yet.
 - A Release build serves the built frontend from disk with no Vite
   (Windows). Checked end to end with the demo session.
 
@@ -89,7 +93,9 @@ redesign.
 
 1. The local Unix transport.
 2. The keychain on macOS (Keychain Services) and Linux (Secret Service).
-3. Packaging and CI.
+3. Packaging: an installer (the Rust app ships an unsigned MSI), the exe
+   icon and version, no console window in Release, and the third-party
+   licence notices. Then a release workflow.
 
 ## Notes
 
