@@ -187,8 +187,6 @@ export function GameTerminal({
     let sheet: HTMLImageElement | null = null;
     let sheetForUrl: string | null = null;
     let frameRequested = false;
-    /** Whether a menu or text window is currently covering the map. */
-    let mapObscured = false;
 
     const paint = () => {
       frameRequested = false;
@@ -212,11 +210,10 @@ export function GameTerminal({
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
       const active = tilesetRef.current;
-      // While a menu is up the map is still on screen behind it, because tty
-      // menus clear only the lines they use. Tiles are opaque where the
-      // characters underneath were not, so the level would show through as
-      // solid blocks; step aside and let the menu be plain text.
-      if (!enabledRef.current || !active || mapObscured) {
+      // A menu needs no special case here: the cells it covers have already
+      // lost their tiles (see StreamPlayer.writeControl), and the rest of the
+      // map keeps its own.
+      if (!enabledRef.current || !active) {
         ctx.clearRect(0, 0, screen.width, screen.height);
         return;
       }
@@ -269,9 +266,10 @@ export function GameTerminal({
     // still open; this is left to drop whatever no longer holds up.
     const player = new StreamPlayer(port, grid, () => {
       grid.prune(readCell);
-      mapObscured = player.mapObscured();
       requestPaint();
       if (stateLog) {
+        // Whether a menu or text window is covering the map.
+        const mapObscured = player.mapObscured();
         const { rows, cols } = port.size();
         scheduleState(
           stateLog.ingest({

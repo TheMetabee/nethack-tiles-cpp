@@ -28,6 +28,13 @@ import { decodeStream } from "./decode";
 import { latin1ToBytes, type GlyphFlags, type StreamItem } from "./protocol";
 import type { TileGrid } from "./tileGrid";
 
+/**
+ * The CSI erase codes: erase in display (`J`), erase in line (`K`) and erase
+ * characters (`X`), each with an optional numeric parameter. NetHack's tty
+ * port clears with `ESC[K` and `ESC[J`, and the screen with `ESC[H ESC[2J`.
+ */
+const ERASE = /\x1b\[(\d*)([JKX])/g;
+
 /** The slice of xterm.js this module depends on. */
 export interface TerminalPort {
   /**
@@ -71,10 +78,14 @@ export class StreamPlayer {
     for (const item of items) {
       if (item.type === "text") {
         const text = decodeStream(latin1ToBytes(item.bytes));
-        this.pending.push(text);
         this.dirty = true;
+        if (!item.prints) {
+          this.writeControl(text);
+          continue;
+        }
+        this.pending.push(text);
         // A glyph's own character is what the tile stands for, not damage.
-        if (item.prints && !this.inGlyph) {
+        if (!this.inGlyph) {
           // Characters, not bytes: one CP437 or UTF-8 character fills one cell
           // however many bytes carried it.
           const covered = text.length;
@@ -99,6 +110,9 @@ export class StreamPlayer {
               this.mapWindow = this.currentWindow;
             }
           }
+          // An object picture in a menu line is not a map cell. The menu's
+          // text stays plain, as it is in a terminal.
+          const inMenu = this.mapObscured();
           this.flush(() => {
             // The previous glyph's character is on screen by now; anchor it
             // before this one moves the cursor on.
@@ -109,7 +123,7 @@ export class StreamPlayer {
             // has just arrived on would be painted black end to end, hiding
             // the terminal's own background. Whatever was here is still gone,
             // hence the damage rather than simply skipping the cell.
-            if (flags.unexplored || flags.nothing) {
+            if (inMenu || flags.unexplored || flags.nothing) {
               this.grid.damage(row, col);
             } else {
               this.grid.place(row, col, tile, flags);
@@ -149,14 +163,14 @@ export class StreamPlayer {
 
   /**
    * True when NetHack is drawing into a menu or text window rather than the
-   * map, so the overlay would be painting tiles over that window.
+   * map. The state log reads it to tell a menu from the map, and glyphs drawn
+   * while it holds are menu pictures, not map cells.
    *
-   * A tty menu clears only the lines it uses, and only when it is inset from
-   * the left edge (`erase_menu_or_text` / `process_menu_window` in
-   * `win/tty/wintty.c`); everywhere else the map is still on screen
-   * underneath. In ASCII that reads as harmless leftovers, but a tile is
-   * opaque, so an unlit floor becomes a solid black block sitting in the
-   * middle of the menu.
+   * It no longer hides the overlay. A tty menu blanks the area it covers with
+   * erase codes (`cl_end` from the menu's left edge in `process_menu_window`,
+   * a full clear when it starts at column 0), and {@link writeControl} retires
+   * the tiles in every erased cell. The tiles the menu did not reach stay, so
+   * the map does not blink each time a menu opens or closes.
    *
    * Windows are numbered in creation order and the map is created during
    * startup, long before any menu, so an id above the map's is a menu or text
@@ -188,6 +202,57 @@ export class StreamPlayer {
       this.grid.commit(this.term.readCell);
     }
     this.onSettled();
+  }
+
+  /**
+   * Writes escape sequences and control codes, retiring the tiles in any
+   * cells an erase code blanks.
+   *
+   * An erased cell holds a space afterwards. A dark floor or unlit corridor is
+   * drawn as a space too, so the character check in {@link TileGrid.prune}
+   * cannot see the change; the erase itself is the only signal. Erase codes
+   * leave the cursor where it was, so the cursor read after each one is the
+   * position it erased from.
+   */
+  private writeControl(text: string): void {
+    let start = 0;
+    for (const match of text.matchAll(ERASE)) {
+      const end = match.index + match[0].length;
+      this.pending.push(text.slice(start, end));
+      start = end;
+      const n = match[1] === "" ? 0 : Number(match[1]);
+      const op = match[2] as "K" | "J" | "X";
+      this.flush(() => this.damageErased(op, n));
+    }
+    if (start < text.length) this.pending.push(text.slice(start));
+  }
+
+  /** Retires the cells one erase code blanked, given the cursor it ran at. */
+  private damageErased(op: "K" | "J" | "X", n: number): void {
+    const { rows, cols } = this.term.size();
+    const { row, col } = this.term.cursor();
+    const span = (r: number, from: number, to: number) => {
+      for (let c = Math.max(0, from); c <= Math.min(to, cols - 1); c++) this.grid.damage(r, c);
+    };
+
+    if (op === "X") {
+      // Erase characters: n cells from the cursor, at least one.
+      span(row, col, col + Math.max(1, n) - 1);
+    } else if (op === "K") {
+      // Erase in line: 0 to the end, 1 from the start, 2 the whole line.
+      if (n === 0) span(row, col, cols - 1);
+      else if (n === 1) span(row, 0, col);
+      else span(row, 0, cols - 1);
+    } else if (n >= 2 || (n === 0 && row === 0 && col === 0)) {
+      // Erase in display, all of it.
+      this.grid.clear();
+    } else if (n === 0) {
+      span(row, col, cols - 1);
+      for (let r = row + 1; r < rows; r++) span(r, 0, cols - 1);
+    } else if (n === 1) {
+      for (let r = 0; r < row; r++) span(r, 0, cols - 1);
+      span(row, 0, col);
+    }
   }
 
   /**

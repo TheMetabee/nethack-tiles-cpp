@@ -47,8 +47,9 @@ function fakeTerminal() {
     /**
      * Parses everything queued, running callbacks in order. Understands just
      * enough of a terminal to be useful: `ESC[row;colH` moves the cursor
-     * (0-based here, to keep the test arithmetic obvious) and any other escape
-     * sequence is consumed without touching a cell.
+     * (0-based here, to keep the test arithmetic obvious), `ESC[K` and
+     * `ESC[2J` blank cells, and any other escape sequence is consumed without
+     * touching a cell.
      */
     drain() {
       let esc: string[] | null = null;
@@ -62,10 +63,15 @@ function fakeTerminal() {
             if (esc.length === 1) {
               if (ch !== "[") esc = null; // a two-byte escape
             } else if (code >= 0x40 && code <= 0x7e) {
-              const move = /^\[(\d+);(\d+)H$/.exec(esc.join(""));
+              const seq = esc.join("");
+              const move = /^\[(\d+);(\d+)H$/.exec(seq);
               if (move) {
                 row = Number(move[1]);
                 col = Number(move[2]);
+              } else if (seq === "[K") {
+                for (let c = col; c < COLS; c++) cells.delete(`${row},${c}`);
+              } else if (seq === "[2J") {
+                cells.clear();
               }
               esc = null;
             }
@@ -553,5 +559,158 @@ describe("StreamPlayer window tracking", () => {
     term.drain();
 
     expect(player.mapObscured()).toBe(true);
+  });
+});
+
+describe("StreamPlayer erase codes", () => {
+  const select = (winid: number): StreamItem => ({
+    type: "event",
+    event: { kind: "selectWindow", winid },
+  });
+  /** One map cell drawn the way tty_print_glyph draws it. */
+  const cell = (row: number, col: number, ch: string, tile = 100): StreamItem[] => [
+    ctrl(`\x1b[${row};${col}H`),
+    glyph(tile),
+    text(ch),
+    glyphEnd,
+  ];
+
+  /**
+   * A map with dark floor (drawn as spaces) at row 2, columns 3, 5 and 10,
+   * the hero at row 2 column 20, and a lit floor at row 4 column 7.
+   *
+   * The spaces are the point: erasing a cell leaves a space, so only the
+   * erase itself can tell the overlay that a dark floor tile is gone.
+   */
+  function map() {
+    const term = fakeTerminal();
+    const grid = new TileGrid();
+    const player = new StreamPlayer(term.port, grid, () => grid.resolve(term.port.readCell));
+    player.feed([
+      select(3),
+      ...cell(2, 3, " "),
+      ...cell(2, 5, " "),
+      ...cell(2, 10, " "),
+      ...cell(2, 20, "@", 344),
+      ...cell(4, 7, "."),
+      frameSync,
+    ]);
+    term.drain();
+    const feed = (items: StreamItem[]) => {
+      player.feed(items);
+      term.drain();
+    };
+    const has = (row: number, col: number) => grid.get(row, col) !== undefined;
+    return { grid, player, feed, has };
+  }
+
+  it("retires the tiles an erase to end of line blanks, from the cursor on", () => {
+    const { feed, has } = map();
+
+    feed([ctrl("\x1b[2;4H\x1b[K")]);
+
+    expect(has(2, 3)).toBe(true);
+    expect(has(2, 5)).toBe(false);
+    expect(has(2, 10)).toBe(false);
+    expect(has(2, 20)).toBe(false);
+    expect(has(4, 7)).toBe(true);
+  });
+
+  it("retires the tiles an erase to start of line blanks, up to the cursor", () => {
+    const { feed, has } = map();
+
+    feed([ctrl("\x1b[2;5H\x1b[1K")]);
+
+    expect(has(2, 3)).toBe(false);
+    expect(has(2, 5)).toBe(false);
+    expect(has(2, 10)).toBe(true);
+  });
+
+  it("retires a whole line on an erase of the line", () => {
+    const { feed, has } = map();
+
+    feed([ctrl("\x1b[2;15H\x1b[2K")]);
+
+    expect([has(2, 3), has(2, 5), has(2, 10), has(2, 20)]).toEqual([false, false, false, false]);
+    expect(has(4, 7)).toBe(true);
+  });
+
+  it("retires everything after the cursor on an erase below", () => {
+    const { feed, has } = map();
+
+    feed([ctrl("\x1b[2;6H\x1b[J")]);
+
+    expect(has(2, 3)).toBe(true);
+    expect(has(2, 5)).toBe(true);
+    expect(has(2, 10)).toBe(false);
+    expect(has(4, 7)).toBe(false);
+  });
+
+  it("retires every tile when the screen is cleared", () => {
+    const { grid, feed } = map();
+
+    feed([ctrl("\x1b[H\x1b[2J")]);
+
+    expect(grid.size).toBe(0);
+  });
+
+  it("retires just the cells an erase of characters covers", () => {
+    const { feed, has } = map();
+
+    feed([ctrl("\x1b[2;4H\x1b[3X")]);
+
+    expect(has(2, 3)).toBe(true);
+    expect(has(2, 5)).toBe(false);
+    expect(has(2, 10)).toBe(true);
+  });
+
+  it("reads each erase's cursor separately when several share one write", () => {
+    const { feed, has } = map();
+
+    feed([ctrl("\x1b[2;8H\x1b[K\x1b[4;0H\x1b[K")]);
+
+    expect(has(2, 5)).toBe(true);
+    expect(has(2, 10)).toBe(false);
+    expect(has(4, 7)).toBe(false);
+  });
+
+  it("keeps the map's tiles outside an inset menu", () => {
+    // process_menu_window: each menu line is cleared from the menu's left
+    // edge, then written. The map to the left and below stays on screen.
+    const { player, feed, has } = map();
+
+    feed([
+      select(6),
+      ctrl("\x1b[2;8H\x1b[K"),
+      text("a - a long sword"),
+      ctrl("\x1b[3;8H\x1b[K"),
+      text("(end)"),
+      frameSync,
+    ]);
+
+    expect(player.mapObscured()).toBe(true);
+    expect(has(2, 3)).toBe(true);
+    expect(has(2, 5)).toBe(true);
+    expect(has(4, 7)).toBe(true);
+    expect(has(2, 10)).toBe(false);
+    expect(has(2, 20)).toBe(false);
+  });
+
+  it("places no tile for an object picture in a menu line", () => {
+    const { feed, has } = map();
+
+    feed([select(6), ...cell(6, 9, ")", 800), text(" a spear")]);
+
+    expect(has(6, 9)).toBe(false);
+  });
+
+  it("puts tiles back when the map is redrawn after the menu", () => {
+    const { feed, has } = map();
+    feed([select(6), ctrl("\x1b[2;8H\x1b[K"), text("a - a long sword")]);
+
+    feed([select(3), ...cell(2, 10, " "), ...cell(2, 20, "@", 344), frameSync]);
+
+    expect(has(2, 10)).toBe(true);
+    expect(has(2, 20)).toBe(true);
   });
 });

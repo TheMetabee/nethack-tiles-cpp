@@ -7,8 +7,9 @@ The original is a Tauri app with a Rust backend. This port starts from its
 v0.1.10 and replaces the Rust backend and Tauri with C++. The React +
 xterm.js frontend is the original's, unchanged apart from one file:
 `frontend/src/lib/backend.ts` replaces Tauri's `invoke` and `listen` with a
-two-function bridge. The tile sheets and the app icon also come from the
-original. Both projects are under the MIT licence; see [LICENSE](LICENSE).
+two-function bridge. It also has one fix from after v0.1.10: an open menu
+hides only the tiles it covers, not the whole map. The tile sheets and the
+app icon also come from the original. Both projects are under the MIT licence; see [LICENSE](LICENSE).
 
 The port reads and writes the original app's saved profiles and, on Windows,
 its saved passwords, so either app sees what the other saved.
