@@ -1,11 +1,13 @@
 name: Release
 
-# Pushing a tag such as v0.1.0 builds the portable Windows ZIP and attaches it
-# to a draft GitHub release. The release is a draft so nothing reaches anyone
-# until it is published by hand, after a look at the notes and the file.
+# Pushing a tag such as v0.1.0 builds the portable packages, a Windows ZIP
+# and a Linux tar.gz, and attaches them to a draft GitHub release. The
+# release is a draft so nothing reaches anyone until it is published by
+# hand, after a look at the notes and the files.
 #
-# The tag must match VERSION in CMakeLists.txt's project(): the ZIP's name and
-# the exe's version details come from there. See "Releases" in README.md.
+# The tag must match VERSION in CMakeLists.txt's project(): the package
+# names and the exe's version details come from there. See "Releases" in
+# README.md.
 on:
   push:
     tags: ["v*"]
@@ -15,14 +17,13 @@ on:
         description: Existing tag to build, e.g. v0.1.0
         required: true
 
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+
 jobs:
   windows:
     name: Windows ZIP
     runs-on: windows-latest
-    permissions:
-      contents: write
-    env:
-      TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -47,8 +48,8 @@ jobs:
       - name: Package
         run: cpack --config build/CPackConfig.cmake -C Release -B build/package
 
-      # A tag that does not match the version would ship a ZIP and an exe
-      # that name another version, so stop and say what to change.
+      # A tag that does not match the version would ship a package and an
+      # exe that name another version, so stop and say what to change.
       - name: Check the version
         run: |
           $version = $env:TAG -replace '^v', ''
@@ -58,32 +59,105 @@ jobs:
             Write-Output "::error::The tag is $env:TAG, but the build made $made. Set VERSION in project() in CMakeLists.txt to $version, commit, and tag that commit."
             exit 1
           }
-          "ZIP=$zip" >> $env:GITHUB_ENV
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-windows
+          path: build/package/*.zip
+          retention-days: 1
 
-      - name: Attach the ZIP to a draft release
+  linux:
+    name: Linux tar.gz
+    # 24.04, because the code needs GCC 13 (std::format). The binary then
+    # needs that glibc (2.39) or newer, so it runs on Ubuntu 24.04 and later
+    # and on other systems as new; the release notes say so.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+      - name: WebKitGTK development files
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/package.json
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: frontend
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Tests
+        run: ctest --test-dir build --output-on-failure
+      - name: Package
+        run: cpack --config build/CPackConfig.cmake -B build/package
+
+      - name: Check the version
+        run: |
+          version="${TAG#v}"
+          tgz="build/package/nethack-tiles-$version-linux-x64.tar.gz"
+          if [ ! -f "$tgz" ]; then
+            echo "::error::The tag is $TAG, but the build made $(ls build/package/*.tar.gz | xargs -n1 basename). Set VERSION in project() in CMakeLists.txt to $version, commit, and tag that commit."
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-linux
+          path: build/package/*.tar.gz
+          retention-days: 1
+
+  # One job makes the release from both packages, so the two builds cannot
+  # race to create it.
+  release:
+    name: Draft the release
+    needs: [windows, linux]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: package-*
+          path: packages
+          merge-multiple: true
+      - name: Attach the packages to a draft release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $notes = @'
-          Portable build for Windows 10 and 11 (64-bit). Unzip it anywhere and
-          run `nethack_tiles.exe`; nothing is installed. Saved servers and
-          passwords are kept in your user profile, so a new version in a new
-          folder still finds them.
+          ls -l packages
+          notes=$(cat <<'EOF'
+          Portable builds; nothing is installed. Saved servers are kept in your
+          user profile, so a new version in a new folder still finds them.
 
-          The exe is not signed, so on the first run Windows SmartScreen asks
-          to confirm: choose "More info", then "Run anyway".
+          **Windows 10 and 11 (64-bit):** unzip `nethack-tiles-*-windows-x64.zip`
+          anywhere and run `nethack_tiles.exe`. The exe is not signed, so on the
+          first run Windows SmartScreen asks to confirm: choose "More info", then
+          "Run anyway". The app needs the Microsoft Edge WebView2 Runtime, which
+          Windows 11 and most of Windows 10 already have; if it is missing, the
+          app says so and offers the download page.
 
-          The app needs the Microsoft Edge WebView2 Runtime, which Windows 11
-          and most of Windows 10 already have. If it is missing, the app says
-          so and offers the download page.
-          '@
-          # A rerun of this workflow for the same tag replaces the file
-          # instead of failing on the release that already exists.
-          gh release view $env:TAG *> $null
-          if ($LASTEXITCODE -eq 0) {
-            gh release upload $env:TAG $env:ZIP --clobber
-          } else {
-            gh release create $env:TAG $env:ZIP --draft --verify-tag `
-              --title "NetHack Tiles Client $env:TAG" `
-              --notes $notes --generate-notes
-          }
+          **Linux (64-bit):** unpack `nethack-tiles-*-linux-x64.tar.gz` and run
+          `./nethack_tiles` in its folder. It needs WebKitGTK 4.1 (on Ubuntu
+          24.04 or newer: `sudo apt install libwebkit2gtk-4.1-0`). Game passwords
+          are not saved between runs on Linux yet.
+          EOF
+          )
+          # A rerun for the same tag replaces the files instead of failing on
+          # the release that already exists.
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" packages/* --clobber
+          else
+            gh release create "$TAG" packages/* --draft --verify-tag \
+              --title "NetHack Tiles Client $TAG" \
+              --notes "$notes" --generate-notes
+          fi

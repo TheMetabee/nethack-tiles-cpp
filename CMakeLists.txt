@@ -239,8 +239,15 @@ if(NH_BUILD_APP)
   include(cmake/notices.cmake)
 
   install(TARGETS nethack_tiles RUNTIME DESTINATION . COMPONENT app)
+  # libssh goes beside the app on every system. Windows looks there for a
+  # DLL on its own; Linux needs the app's rpath to say so ($ORIGIN is the
+  # app's own folder). Only the versioned file and its soname link go in:
+  # the libssh.so link is for building against it.
   if(WIN32)
     install(FILES $<TARGET_FILE:ssh> DESTINATION . COMPONENT app)
+  else()
+    install(TARGETS ssh LIBRARY DESTINATION . NAMELINK_SKIP COMPONENT app)
+    set_target_properties(nethack_tiles PROPERTIES INSTALL_RPATH "$ORIGIN")
   endif()
   install(DIRECTORY assets/ DESTINATION assets COMPONENT app)
   if(NH_BUILD_FRONTEND)
@@ -256,12 +263,27 @@ if(NH_BUILD_APP)
   set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
   set(CPACK_PACKAGE_INSTALL_DIRECTORY "NetHack Tiles Client")
   set(CPACK_RESOURCE_FILE_LICENSE ${CMAKE_SOURCE_DIR}/LICENSE)
-  set(CPACK_GENERATOR ZIP)
+  # A ZIP on Windows, a tar.gz elsewhere: what each system unpacks without
+  # extra tools, and a tar.gz keeps the libssh soname link and the app's
+  # executable bit.
+  if(WIN32)
+    set(CPACK_GENERATOR ZIP)
+    set(NH_PACKAGE_SYSTEM windows)
+  else()
+    set(CPACK_GENERATOR TGZ)
+    string(TOLOWER ${CMAKE_SYSTEM_NAME} NH_PACKAGE_SYSTEM)
+  endif()
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(AMD64|x86_64)$")
+    set(NH_PACKAGE_ARCH x64)
+  else()
+    string(TOLOWER ${CMAKE_SYSTEM_PROCESSOR} NH_PACKAGE_ARCH)
+  endif()
   set(CPACK_COMPONENTS_ALL app)
   set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
   set(CPACK_COMPONENTS_GROUPING ALL_COMPONENTS_IN_ONE)
   # One name for the file and the folder inside it.
-  set(CPACK_PACKAGE_FILE_NAME "nethack-tiles-${PROJECT_VERSION}-windows-x64")
+  set(CPACK_PACKAGE_FILE_NAME
+    "nethack-tiles-${PROJECT_VERSION}-${NH_PACKAGE_SYSTEM}-${NH_PACKAGE_ARCH}")
   set(CPACK_ARCHIVE_FILE_NAME ${CPACK_PACKAGE_FILE_NAME})
   # Unzips into one folder of that name, not loose files. A package made
   # from components reads the second variable.

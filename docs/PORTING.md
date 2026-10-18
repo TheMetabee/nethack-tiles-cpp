@@ -69,9 +69,12 @@ Proven end to end in the spike (Windows):
   page, the tile sheets, the saved profiles and an SSH connect all work.
   The message box for a missing WebView2 runtime is not tested: WebView2
   could not be made to fail on this machine short of removing it.
-- Releases: a `v*` tag runs `.github/workflows/release.yml`, which attaches
-  the ZIP to a draft GitHub release. The app ships as that portable ZIP only;
-  there is no MSI, by choice.
+- Releases: a `v*` tag runs `.github/workflows/release.yml`, which builds a
+  Windows ZIP and a Linux tar.gz and attaches both to a draft GitHub release
+  from one final job. The app ships as these portable packages only; there
+  is no MSI, by choice. The Linux tar.gz was checked in WSL: unpacked and
+  started from another folder, it loads its own libssh through the `$ORIGIN`
+  rpath and serves its page from disk.
 - A Release build serves the built frontend from disk with no Vite
   (Windows). Checked end to end with the demo session.
 
@@ -107,7 +110,7 @@ redesign.
 | Dialog plugin | `IFileOpenDialog` on Windows; NSOpenPanel and GTK later | Windows done |
 | Opener plugin | `ShellExecuteW`, `open`, `xdg-open` | done |
 | Serving the built frontend | WebView2 `SetVirtualHostNameToFolderMapping`; a WebKitGTK URI scheme; WKURLSchemeHandler later | Windows and Linux done |
-| Bundler, notarisation | CPack ZIP on Windows (portable, no installer); macOS and Linux packages later | Windows done |
+| Bundler, notarisation | CPack: ZIP on Windows, tar.gz on Linux (portable, no installer); macOS later | Windows and Linux done |
 | WebView2 runtime | Ships with Windows 10 and 11; the installer adds Microsoft's bootstrapper for the rest | |
 
 ## Next steps

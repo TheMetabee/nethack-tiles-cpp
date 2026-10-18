@@ -65,6 +65,10 @@ build/nethack_tiles
 ```
 
 A Release build serves `build/frontend/` itself, under `nethack-tiles://app/`.
+`cpack --config build/CPackConfig.cmake -B build/package` makes
+`nethack-tiles-<version>-linux-x64.tar.gz`: the app, `libssh.so.4` beside it
+(found through the app's `$ORIGIN` rpath), the tile sheets, the frontend and
+the licences. It needs WebKitGTK 4.1 and glibc 2.39 (Ubuntu 24.04) or newer.
 The frontend build needs Node.js; without it, configure with
 `-DNH_BUILD_FRONTEND=OFF` and copy a `frontend/dist` built elsewhere to
 `build/frontend`. The keychain and local play are not ported to Linux yet.
@@ -93,7 +97,8 @@ says so and offers Microsoft's download page.
 
 ## Releases
 
-A release is the portable ZIP on a GitHub release. There is no installer.
+A release is two portable packages on a GitHub release, a Windows ZIP and a
+Linux tar.gz. There is no installer.
 
 1. Set `VERSION` in `project()` in `CMakeLists.txt`, for example `0.1.0`, and
    commit it. The ZIP's name and the exe's version details come from there.
@@ -104,13 +109,14 @@ A release is the portable ZIP on a GitHub release. There is no installer.
    git push origin v0.1.0
    ```
 
-3. `.github/workflows/release.yml` builds and tests the app, makes the ZIP and
-   attaches it to a **draft** release with notes from the commits since the
-   last release. Check the draft on GitHub, then publish it.
+3. `.github/workflows/release.yml` builds and tests the app on Windows and
+   Linux, makes both packages and attaches them to a **draft** release with
+   notes from the commits since the last release. Check the draft on GitHub,
+   then publish it.
 
 If the tag and `VERSION` differ, the workflow stops and says what to change.
 To build an existing tag again, run the workflow by hand from the Actions tab
-with that tag; it replaces the ZIP on the draft.
+with that tag; it replaces the packages on the draft.
 
 ## CI
 
