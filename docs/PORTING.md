@@ -31,6 +31,12 @@ Proven end to end in the spike (Windows):
   check with its version warning, the auto-login, the demuxer and the
   tile-data notice. `NH_DEMO=1` swaps SSH for the old demo room, which goes
   through the same pipeline.
+- Profiles: the C++ app reads and writes the Rust app's own
+  `%APPDATA%\statico\nethack-tiles\config\profiles.toml` and its Credential
+  Manager entries, so either app sees what the other saved. Checked on a
+  real machine: the Rust program in `tools/rust-compat` read a password and
+  a file the C++ app wrote, and the C++ app saw a password Rust wrote. After
+  several saves the file was byte-identical to the Rust app's.
 - Every pure module is ported: `demux.rs`, `glyph.rs`, `banner.rs`,
   `autologin.rs`, `tileset.rs`, `tilesrc.rs`, `statelog.rs` and
   `debuglog.rs`, with all their tests and a few more. With the SSH and
@@ -63,7 +69,7 @@ redesign.
 | `debuglog.rs` | 304 | `core/debuglog`; every session feeds it (`NHTILES_LOG`, `NHTILES_RAW`) | S | done |
 | `session.rs` | 85 | `core/session`: the `Session` interface and its events | S | done |
 | `ssh.rs` | 446 | `net/ssh`: libssh 0.12.2 on mbedTLS 3.6.7, one pump thread per session | M | done (Windows) |
-| `profiles.rs` | 1101 | TOML storage (toml++) and a keychain layer: Windows Credential Manager, macOS Keychain, Linux libsecret | M | defaults only; profiles and passwords in memory for one run |
+| `profiles.rs` | 1101 | `core/profiles` (toml++ reads, a writer of its own writes) and `core/keychain` (Windows Credential Manager) | M | done (Windows); Keychain and libsecret later |
 | `local.rs` | 702 | `forkpty` on Unix; Windows stays unsupported (ConPTY later) | M | |
 | `app.rs`, `lib.rs`, `icon.rs` | ~1200 | `src/app/` | | most commands stubbed |
 
@@ -81,8 +87,8 @@ redesign.
 
 ## Next steps
 
-1. Profile storage and the keychain.
-2. The local Unix transport.
+1. The local Unix transport.
+2. The keychain on macOS (Keychain Services) and Linux (Secret Service).
 3. Packaging and CI.
 
 ## Notes
@@ -128,3 +134,13 @@ redesign.
   git clones. Both carry test or example files with very long names, and
   git cannot check those out under a deep build directory on Windows
   (MAX_PATH). CMake's own extraction handles the long paths.
+- The profile file is written byte for byte as the Rust app writes it: the
+  same key order, layout and string styles (toml_writer 1.1.2's rules), and
+  floats as Rust prints an f32. toml++ only reads, because its writer sorts
+  keys. `tests/profiles_rust_fixtures_test.cpp` holds documents captured from
+  the Rust code with `tools/rust-compat`; regenerate them there, never by hand.
+- Display settings are `float`, as they are `f32` in the Rust app, so both
+  apps hold and write the same values.
+- Keychain entries: Credential Manager generic credentials named
+  `<profile id>.io.statico.nethack-tiles`, the password in UTF-16LE. This is
+  what keyring 4.1.6 in its default `v1` mode writes.

@@ -1,10 +1,10 @@
 // Hosts the React + xterm.js frontend in a system webview and answers its
 // commands. Replaces the Tauri app shell (src-tauri/src/app.rs).
 //
-// Ported: SSH sessions with the auto-login, tilesets, custom tilesets, the
-// state log and the debug logs. Not yet: saved profiles and the keychain
-// (both live in memory for one run), and local play. NH_DEMO=1 replaces SSH
-// with a demo that draws one room.
+// Ported: SSH sessions with the auto-login, saved profiles with passwords in
+// the keychain (Windows), tilesets, custom tilesets, the state log and the
+// debug logs. Not yet: local play, and the keychain on macOS and Linux.
+// NH_DEMO=1 replaces SSH with a demo that draws one room.
 
 #include <algorithm>
 #include <atomic>
@@ -27,6 +27,8 @@
 #include "core/game_stream.hpp"
 #include "core/session.hpp"
 #include "core/glyph.hpp"
+#include "core/keychain.hpp"
+#include "core/profiles.hpp"
 #include "core/statelog.hpp"
 #include "core/tileset.hpp"
 #include "net/ssh.hpp"
@@ -93,26 +95,57 @@ json tileset_payload(const nh::Tileset& sheet) {
   return {{"manifest", sheet.manifest()}, {"dataUrl", sheet.data_url()}};
 }
 
-// --- Profiles (defaults only; storage is not ported yet) ---------------------
+// --- Profiles -------------------------------------------------------------------
 
-json make_profile(const std::string& id, const std::string& name, const std::string& host,
-                  const std::string& version, const Tilesets& sheets) {
-  std::string tileset_id;
-  for (const auto& [sheet_id, sheet] : sheets) {
-    if (json(sheet.manifest().version) == version) tileset_id = sheet_id;
+// The bundled sheet built for `version`. Tile numbers are positional and
+// renumbered between NetHack lines, so this pairing is not cosmetic.
+std::string sheet_for_version(const Tilesets& sheets, nh::NetHackVersion version) {
+  for (const auto& [id, sheet] : sheets) {
+    if (sheet.manifest().version == version) return id;
   }
-  return {
-      {"id", id},           {"name", name},
-      {"transport", "ssh"}, {"command", ""},
-      {"host", host},       {"port", 22},
-      {"sshUser", "nethack"}, {"gameUser", ""},
-      {"version", version}, {"tilesetId", tileset_id},
-      {"fontFamily", "Menlo, DejaVu Sans Mono, Consolas, monospace"},
-      {"fontSize", 16},     {"scale", 1.0},
-      {"lineHeight", 1.0},  {"letterSpacing", 0.0},
-      {"pixelPerfect", false}, {"stateLogEnabled", false},
-      {"stateLogDirectory", ""},
-  };
+  return sheets.empty() ? std::string() : sheets.begin()->first;
+}
+
+// Opens the saved profiles: the Rust app's own file and keychain entries, so
+// either app sees what the other saved.
+nh::ProfileStore open_profiles(const Tilesets& sheets) {
+  const fs::path path = nh::ProfileStore::default_path();
+  // The bundle identifier changed, which moved both the config directory and
+  // the keychain service. Neither is worth making anyone set up again.
+  try {
+    nh::ProfileStore::adopt_legacy(path, nh::ProfileStore::legacy_path());
+  } catch (const std::exception& e) {
+    std::cerr << "[profiles] could not adopt the profiles from the previous version: " << e.what()
+              << "\n";
+  }
+
+  std::unique_ptr<nh::SecretStore> secrets;
+  if (nh::KeychainSecrets::available()) {
+    secrets = std::make_unique<nh::WithLegacy>(
+        std::make_unique<nh::KeychainSecrets>(nh::kKeychainService),
+        std::make_unique<nh::KeychainSecrets>(nh::kLegacyKeychainService));
+  } else {
+    std::cerr << "[profiles] this platform's keychain is not ported; passwords last until the "
+                 "app closes\n";
+    secrets = std::make_unique<nh::MemorySecrets>();
+  }
+
+  auto store = nh::ProfileStore::load(path, std::move(secrets));
+  // Nobody's first run should start on an empty screen: offer the two public
+  // servers, each with the sheet for its release.
+  if (store.is_first_run()) {
+    for (auto profile : nh::default_profiles(std::nullopt)) {
+      profile.tileset_id = sheet_for_version(sheets, profile.version);
+      try {
+        store.upsert(std::move(profile));
+      } catch (const std::exception& e) {
+        std::cerr << "[profiles] could not write the default profiles: " << e.what() << "\n";
+      }
+    }
+  }
+  std::cerr << "[profiles] " << store.profiles().size() << " profiles from "
+            << store.path().string() << "\n";
+  return store;
 }
 
 // --- Stream items as the frontend expects them (see protocol.ts) -------------
@@ -630,10 +663,16 @@ int main() {
   Tilesets sheets = load_tilesets(assets / "tiles");
   std::cerr << "[app] " << sheets.size() << " tile sheets from " << assets.string() << "\n";
 
-  json profiles = json::array({
-      make_profile("nethack-alt-org", "NetHack.alt.org", "nethack.alt.org", "v50", sheets),
-      make_profile("hardfought-org", "Hardfought (US)", "us.hardfought.org", "v36", sheets),
-  });
+  std::optional<nh::ProfileStore> profiles;
+  std::string startup_error;
+  try {
+    profiles.emplace(open_profiles(sheets));
+  } catch (const std::exception& e) {
+    // A config file that does not parse must not be overwritten with
+    // defaults, so the app stops and says why.
+    startup_error = e.what();
+    std::cerr << "[app] " << startup_error << "\n";
+  }
 
   webview::webview view(true, nullptr);
   view.set_title("NetHack Tiles Client (C++)");
@@ -641,43 +680,29 @@ int main() {
 
   Bridge bridge(view);
   SessionRunner session(bridge);
-  // Game passwords by profile id. In memory only until the keychain is
-  // ported, so the auto-login works for this run of the app.
-  std::map<std::string, std::string> passwords;
-
-  const auto find_profile = [&](const std::string& id) -> json& {
-    for (auto& p : profiles) {
-      if (p["id"] == id) return p;
-    }
-    throw std::runtime_error("no profile with id " + id);
-  };
-
-  bridge.command("list_profiles", [&](const json&) { return profiles; });
-  bridge.command("last_used_profile", [](const json&) { return json(nullptr); });
+  bridge.command("list_profiles", [&](const json&) { return json(profiles->profiles()); });
+  bridge.command("last_used_profile", [&](const json&) {
+    const auto& last = profiles->last_used();
+    return last ? json(*last) : json(nullptr);
+  });
+  // Whether a password is on file, so the page can say "saved" without ever
+  // reading the secret back.
   bridge.command("has_saved_password", [&](const json& args) {
-    return json(passwords.contains(args.at("id").get<std::string>()));
+    return json(profiles->password(args.at("id").get<std::string>()).has_value());
   });
   bridge.command("save_profile", [&](const json& args) {
-    // Kept in memory only until profile storage is ported.
-    const json& profile = args.at("profile");
-    try {
-      find_profile(profile.at("id")) = profile;
-    } catch (const std::runtime_error&) {
-      profiles.push_back(profile);
-    }
+    auto profile = args.at("profile").get<nh::Profile>();
+    const std::string id = profile.id;
+    profiles->upsert(std::move(profile));
     // A null password leaves the stored one as it is.
     if (const auto password = args.find("password");
         password != args.end() && password->is_string()) {
-      passwords[profile.at("id").get<std::string>()] = password->get<std::string>();
+      profiles->set_password(id, password->get<std::string>());
     }
     return json(nullptr);
   });
   bridge.command("delete_profile", [&](const json& args) {
-    const std::string id = args.at("id");
-    passwords.erase(id);
-    profiles.erase(std::remove_if(profiles.begin(), profiles.end(),
-                                  [&](const json& p) { return p["id"] == id; }),
-                   profiles.end());
+    profiles->remove(args.at("id").get<std::string>());
     return json(nullptr);
   });
 
@@ -718,39 +743,50 @@ int main() {
   // shows the game only after a connect that worked.
   bridge.command_async("session_connect", [&](const json& args, Bridge::Reply reply) {
     const json& request = args.at("request");
-    const json& profile = find_profile(request.at("profileId"));
-    if (profile.value("transport", std::string("ssh")) == "local") {
-      not_ported("Local play");
-    }
-    const std::string id = profile.at("id");
-    const auto sheet = sheets.find(profile.value("tilesetId", std::string()));
-    const auto password = passwords.find(id);
+    const std::string id = request.at("profileId");
+    const nh::Profile* found = profiles->get(id);
+    if (!found) throw std::runtime_error("no profile with id \"" + id + "\"");
+    const nh::Profile profile = *found;
+    if (profile.transport == nh::Transport::Local) not_ported("Local play");
+    const auto sheet = sheets.find(profile.tileset_id);
 
     ConnectPlan plan;
-    plan.host = profile.at("host").get<std::string>();
-    plan.port = profile.value("port", std::uint16_t{22});
-    plan.ssh_user = profile.value("sshUser", std::string("nethack"));
-    plan.version = profile.at("version").get<nh::NetHackVersion>();
-    plan.login = nh::autologin_for(
-        false, profile.value("gameUser", std::string()),
-        password == passwords.end() ? std::nullopt : std::optional(password->second));
+    plan.host = profile.host;
+    plan.port = profile.port;
+    plan.ssh_user = profile.ssh_user;
+    plan.version = profile.version;
+    // Read whenever a prompt could want it. Whether it is typed is
+    // autologin_for's decision.
+    plan.login = nh::autologin_for(false, profile.game_user, profiles->password(id));
     plan.tile_count = sheet == sheets.end() ? 0 : sheet->second.manifest().tile_count;
     plan.cols = request.at("cols").get<std::uint32_t>();
     plan.rows = request.at("rows").get<std::uint32_t>();
     if (const char* demo = std::getenv("NH_DEMO"); demo && *demo) plan.demo = true;
-    session.connect(std::move(plan), reply);
 
-    // A new game starts a new state log. Files from the last one would
-    // describe a dungeon the player has left.
-    const std::string directory = profile.value("stateLogDirectory", std::string());
-    if (profile.value("stateLogEnabled", false) && !directory.empty()) {
-      try {
-        nh::statelog::clear(nh::statelog::path_from_utf8(directory));
-      } catch (const std::exception& e) {
-        std::cerr << "[app] could not clear the state log at " << directory << ": " << e.what()
-                  << "\n";
+    session.connect(std::move(plan), [&view, &profiles, profile, reply](bool ok,
+                                                                        const json& value) {
+      if (ok) {
+        // On the UI thread, which owns the store.
+        view.dispatch([&profiles, profile] {
+          try {
+            profiles->set_last_used(profile.id);
+          } catch (const std::exception& e) {
+            std::cerr << "[profiles] could not record the last profile: " << e.what() << "\n";
+          }
+          // A new game starts a new state log. Files from the last one
+          // would describe a dungeon the player has left.
+          if (profile.state_log_enabled && !profile.state_log_directory.empty()) {
+            try {
+              nh::statelog::clear(nh::statelog::path_from_utf8(profile.state_log_directory));
+            } catch (const std::exception& e) {
+              std::cerr << "[app] could not clear the state log at "
+                        << profile.state_log_directory << ": " << e.what() << "\n";
+            }
+          }
+        });
       }
-    }
+      reply(ok, value);
+    });
   });
   bridge.command("session_write", [&](const json& args) {
     session.write(args.at("data").get<std::string>());
@@ -802,6 +838,11 @@ int main() {
     return json(nullptr);
   });
 
+  if (!startup_error.empty()) {
+    view.set_html(error_page(startup_error));
+    view.run();
+    return 1;
+  }
   try {
     const std::string url = frontend_url(view, exe_dir() / "frontend");
     std::cerr << "[app] loading " << url << "\n";

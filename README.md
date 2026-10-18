@@ -54,6 +54,7 @@ To inspect the page, set `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` to
 | `src/app/bridge.*` | The command and event channel to the page. |
 | `src/app/main.cpp` | The window, the commands, the demo session. |
 | `tests/` | doctest tests, ported case for case from the Rust tests. |
+| `tools/rust-compat/` | Runs the Rust app's profile and keychain code, to check the C++ port against it. Not built by CMake. |
 | `tools/tiles2png.cpp` | Builds a tile sheet from NetHack's `win/share/*.txt`. Not part of the app. |
 | `frontend/` | The React + xterm.js frontend. |
 | `assets/tiles/` | Tile sheets and their manifests, copied next to the executable. |

@@ -32,6 +32,13 @@ FetchContent_Declare(stb
   GIT_TAG 2c980bb59875b0d32144a71867fbdebb2f77cd20)
 FetchContent_MakeAvailable(stb)
 
+# Profile storage reads and writes the Rust app's profiles.toml.
+FetchContent_Declare(tomlplusplus
+  URL https://github.com/marzer/tomlplusplus/archive/refs/tags/v3.4.0.tar.gz
+  URL_HASH SHA256=8517f65938a4faae9ccf8ebb36631a38c1cadfb5efa85d9a72e15b9e97d25155
+  DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+FetchContent_MakeAvailable(tomlplusplus)
+
 # SSH to the public servers: libssh on mbedTLS. mbedTLS builds with plain
 # CMake on every platform, where OpenSSL needs Perl and NASM on Windows.
 #
@@ -104,15 +111,22 @@ add_library(nethack_core STATIC
   src/core/demux.cpp
   src/core/game_stream.cpp
   src/core/glyph.cpp
+  src/core/keychain.cpp
+  src/core/profiles.cpp
   src/core/statelog.cpp
   src/core/stb.cpp
   src/core/tileset.cpp
   src/core/tilesrc.cpp)
 target_include_directories(nethack_core PUBLIC src)
 target_include_directories(nethack_core SYSTEM PUBLIC ${stb_SOURCE_DIR})
-target_link_libraries(nethack_core PUBLIC nlohmann_json::nlohmann_json)
+target_link_libraries(nethack_core PUBLIC nlohmann_json::nlohmann_json
+  PRIVATE tomlplusplus::tomlplusplus)
 if(WIN32)
-  target_compile_definitions(nethack_core PRIVATE _CRT_SECURE_NO_WARNINGS)
+  # Credential Manager (advapi32) and the config folder (shell32, ole32).
+  target_link_libraries(nethack_core PRIVATE advapi32 shell32 ole32)
+endif()
+if(WIN32)
+  target_compile_definitions(nethack_core PRIVATE NOMINMAX _CRT_SECURE_NO_WARNINGS)
 endif()
 if(MSVC)
   target_compile_options(nethack_core PRIVATE /W4 /permissive- /utf-8)
@@ -206,6 +220,9 @@ add_executable(core_tests
   tests/demux_test.cpp
   tests/game_stream_test.cpp
   tests/glyph_test.cpp
+  tests/keychain_test.cpp
+  tests/profiles_rust_fixtures_test.cpp
+  tests/profiles_test.cpp
   tests/ssh_test.cpp
   tests/statelog_test.cpp
   tests/tileset_test.cpp
