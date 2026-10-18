@@ -103,9 +103,11 @@ endif()
 
 # An archive, not a git clone, for the same reason as mbedTLS: some of its
 # example file names pass MAX_PATH under a deep build directory.
+# 2.5 or later: 2.4.11 declares CMake 3.0 as its minimum, which CMake 4
+# refuses, and CI runners have CMake 4.
 FetchContent_Declare(doctest
-  URL https://github.com/doctest/doctest/archive/refs/tags/v2.4.11.tar.gz
-  URL_HASH SHA256=632ed2c05a7f53fa961381497bf8069093f0d6628c5f26286161fbd32a560186
+  URL https://github.com/doctest/doctest/archive/refs/tags/v2.5.3.tar.gz
+  URL_HASH SHA256=174ebc4e769928959614789c5b4e9c3d0a0f81a62bb608756b127bfebfb21331
   DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
 FetchContent_MakeAvailable(doctest)
 

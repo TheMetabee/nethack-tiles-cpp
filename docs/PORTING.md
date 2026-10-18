@@ -150,3 +150,7 @@ redesign.
 - Keychain entries: Credential Manager generic credentials named
   `<profile id>.io.statico.nethack-tiles`, the password in UTF-16LE. This is
   what keyring 4.1.6 in its default `v1` mode writes.
+- GitHub's Windows and macOS runners have CMake 4, which refuses any
+  project that declares a minimum below 3.5. doctest 2.4.11 declared 3.0, so
+  it is 2.5.3 now. The whole build was checked from scratch with CMake 4.4.4
+  as well as 3.31 (Windows) and 3.28 (Linux).
