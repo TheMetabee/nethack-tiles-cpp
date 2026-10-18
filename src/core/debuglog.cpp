@@ -30,8 +30,10 @@ std::string printable(std::string_view bytes) {
   return out;
 }
 
-// The text in double quotes, as Rust's `{:?}` writes it.
-std::string quoted(std::string_view text) {
+// The text in double quotes, as Rust's `{:?}` writes it. Not called
+// `quoted`: with <iomanip> in view, as libc++ has it, a call on a
+// std::string finds std::quoted by argument lookup and takes it.
+std::string debug_quoted(std::string_view text) {
   std::string out = "\"";
   for (const char c : text) {
     if (c == '"' || c == '\\') out += '\\';
@@ -80,7 +82,7 @@ void TileDebugLog::close_glyph() {
   if (!glyph.text.empty()) samples_.try_emplace(glyph.tile, glyph.text);
 
   out_ << std::format("tile={:<5} flags=0x{:04x} ch={}{}\n", glyph.tile, glyph.flags,
-                      quoted(glyph.text), outside ? " OUT-OF-RANGE" : "");
+                      debug_quoted(glyph.text), outside ? " OUT-OF-RANGE" : "");
 }
 
 void TileDebugLog::summarize() {
@@ -104,7 +106,7 @@ void TileDebugLog::summarize() {
     const auto [count, tile] = by_count[i];
     const auto sample = samples_.find(tile);
     out_ << std::format("  tile={:<5} seen={:<6} ch={}{}\n", tile, count,
-                        quoted(sample == samples_.end() ? "" : sample->second),
+                        debug_quoted(sample == samples_.end() ? "" : sample->second),
                         tile >= tile_count_ ? " OUT-OF-RANGE" : "");
   }
   out_.flush();

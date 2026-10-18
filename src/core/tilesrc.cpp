@@ -24,8 +24,9 @@ std::string_view trim_start(std::string_view s) {
   return s;
 }
 
-// Rust's `{:?}` for a string: the text in double quotes.
-std::string quoted(std::string_view text) {
+// Rust's `{:?}` for a string: the text in double quotes. Not called
+// `quoted`, for the reason in debuglog.cpp.
+std::string debug_quoted(std::string_view text) {
   std::string out = "\"";
   for (const char c : text) {
     if (c == '"' || c == '\\') out += '\\';
@@ -41,14 +42,14 @@ std::string quoted(std::string_view text) {
 [[noreturn]] void ragged(std::size_t line, const std::string& name, std::size_t got,
                          std::size_t expected) {
   fail(TileSourceError::Kind::RaggedRow,
-       "line " + std::to_string(line) + ": tile " + quoted(name) + " has a row of " +
+       "line " + std::to_string(line) + ": tile " + debug_quoted(name) + " has a row of " +
            std::to_string(got) + " pixels, expected " + std::to_string(expected));
 }
 
 [[noreturn]] void wrong_height(std::size_t line, const std::string& name, std::size_t got,
                                std::size_t expected) {
   fail(TileSourceError::Kind::WrongHeight,
-       "line " + std::to_string(line) + ": tile " + quoted(name) + " has " +
+       "line " + std::to_string(line) + ": tile " + debug_quoted(name) + " has " +
            std::to_string(got) + " rows, expected " + std::to_string(expected));
 }
 
@@ -144,11 +145,11 @@ std::vector<TileImage> parse_tile_file(std::string_view text) {
     }
 
     fail(TileSourceError::Kind::Unexpected, "line " + std::to_string(line) + ": unexpected " +
-                                                quoted(trimmed) + " outside a tile block");
+                                                debug_quoted(trimmed) + " outside a tile block");
   }
 
   if (open) {
-    fail(TileSourceError::Kind::Unterminated, "tile " + quoted(open->name) + " is never closed");
+    fail(TileSourceError::Kind::Unterminated, "tile " + debug_quoted(open->name) + " is never closed");
   }
   if (tiles.empty()) fail(TileSourceError::Kind::Empty, "no tiles found");
   return tiles;
