@@ -15,6 +15,21 @@ its saved passwords, so either app sees what the other saved.
 
 See [docs/PORTING.md](docs/PORTING.md) for what is ported and what is next.
 
+## Not ported yet
+
+Everything else from the original works on Windows and Linux: SSH play on
+the public servers, the tiles, saved profiles and passwords, custom tile
+sheets and the state log. What remains:
+
+| Piece | Where it is missing | What the port needs |
+|---|---|---|
+| Local play (`local.rs`): run a NetHack installed on this machine | All platforms; the app says it is not ported | A pseudo-terminal (`forkpty`) on Linux and macOS. The original does not run local games on Windows either; ConPTY could add it later. |
+| The folder picker for the state log | Linux and macOS; Windows has one | A GTK dialog on Linux, `NSOpenPanel` on macOS. Until then, set `stateLogDirectory` in `profiles.toml` by hand. |
+| The app on macOS | macOS builds and tests the core only | Serving the built frontend from disk (a `WKURLSchemeHandler`), finding the app's folder (`_NSGetExecutablePath`), the Keychain for passwords, then an app bundle, signing and notarisation. |
+
+Not yet checked live, though unit-tested: recording a new server's host key
+on first connect, and refusing a host key that has changed.
+
 ## Run (Windows, MSVC 2022)
 
 ```sh

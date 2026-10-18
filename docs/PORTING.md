@@ -96,10 +96,10 @@ redesign.
 | `statelog.rs` | 185 | `core/statelog`; `state_log_write` and the clear on connect | S | done |
 | `debuglog.rs` | 304 | `core/debuglog`; every session feeds it (`NHTILES_LOG`, `NHTILES_RAW`) | S | done |
 | `session.rs` | 85 | `core/session`: the `Session` interface and its events | S | done |
-| `ssh.rs` | 446 | `net/ssh`: libssh 0.12.2 on mbedTLS 3.6.7, one pump thread per session | M | done (Windows) |
+| `ssh.rs` | 446 | `net/ssh`: libssh 0.12.2 on mbedTLS 3.6.7, one pump thread per session | M | done (Windows, Linux) |
 | `profiles.rs` | 1101 | `core/profiles` (toml++ reads, a writer of its own writes) and `core/keychain` (Windows Credential Manager, Linux Secret Service via libsecret) | M | done (Windows, Linux); macOS Keychain later |
 | `local.rs` | 702 | `forkpty` on Unix; Windows stays unsupported (ConPTY later) | M | |
-| `app.rs`, `lib.rs`, `icon.rs` | ~1200 | `src/app/` | | most commands stubbed |
+| `app.rs`, `lib.rs`, `icon.rs` | ~1200 | `src/app/` | | done: every command; local play fails with "not ported" |
 
 ### Tauri itself
 
@@ -119,6 +119,8 @@ redesign.
 2. The keychain on macOS (Keychain Services).
 3. Serving the built frontend from disk on macOS (a WKURLSchemeHandler), and
    `exe_dir()` there (`_NSGetExecutablePath`).
+4. The folder picker on Linux (GTK) and macOS (NSOpenPanel).
+5. A macOS app bundle, signing and notarisation.
 
 ## Notes
 
