@@ -1,8 +1,17 @@
 # nethack-tiles-cpp
 
-The NetHack Tiles Client with a C++ backend in place of Rust. The React +
-xterm.js frontend is unchanged apart from one file: `frontend/src/lib/backend.ts`
-replaces Tauri's `invoke` and `listen` with a two-function bridge.
+A C++ port of [NetHack Tiles Client](https://github.com/statico/nethack-tiles-client)
+by Ian Langworth: play NetHack on the public servers, with graphical tiles.
+
+The original is a Tauri app with a Rust backend. This port starts from its
+v0.1.10 and replaces the Rust backend and Tauri with C++. The React +
+xterm.js frontend is the original's, unchanged apart from one file:
+`frontend/src/lib/backend.ts` replaces Tauri's `invoke` and `listen` with a
+two-function bridge. The tile sheets and the app icon also come from the
+original. Both projects are under the MIT licence; see [LICENSE](LICENSE).
+
+The port reads and writes the original app's saved profiles and, on Windows,
+its saved passwords, so either app sees what the other saved.
 
 See [docs/PORTING.md](docs/PORTING.md) for what is ported and what is next.
 

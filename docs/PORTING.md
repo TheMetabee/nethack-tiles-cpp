@@ -1,6 +1,7 @@
 # Porting plan: Rust backend to C++
 
-Source: `nethack-tiles-client` v0.1.10 (Tauri 2). The goal is no Rust. The
+Source: [`nethack-tiles-client`](https://github.com/statico/nethack-tiles-client)
+v0.1.10 (Tauri 2), by Ian Langworth. The goal is no Rust. The
 React + xterm.js frontend stays.
 
 ## Approach
