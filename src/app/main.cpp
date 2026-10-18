@@ -652,6 +652,43 @@ void open_url(const std::string& url) {
 #endif
 }
 
+// Opens the window, or says why it cannot. A Release build has no console,
+// so a failure that only went to the log would look like nothing happened.
+std::unique_ptr<webview::webview> open_window() {
+  try {
+#ifdef NDEBUG
+    // No browser developer tools in a release, as in the Rust app. For a
+    // debugger, WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS still works; see README.
+    constexpr bool kDevTools = false;
+#else
+    constexpr bool kDevTools = true;
+#endif
+    return std::make_unique<webview::webview>(kDevTools, nullptr);
+  } catch (const webview::exception& e) {
+    std::cerr << "[app] cannot open the window: " << e.error().message() << "\n";
+#ifdef _WIN32
+    if (e.error().code() == WEBVIEW_ERROR_MISSING_DEPENDENCY) {
+      // Windows 11 and most of Windows 10 have it. Some trimmed editions,
+      // such as LTSC builds, may not.
+      const int answer = MessageBoxW(
+          nullptr,
+          L"NetHack Tiles Client needs the Microsoft Edge WebView2 Runtime, which is not "
+          L"installed on this computer.\n\nOpen Microsoft's download page now?",
+          L"NetHack Tiles Client", MB_YESNO | MB_ICONERROR);
+      if (answer == IDYES) {
+        ShellExecuteW(nullptr, L"open",
+                      L"https://developer.microsoft.com/microsoft-edge/webview2/", nullptr,
+                      nullptr, SW_SHOWNORMAL);
+      }
+    } else {
+      MessageBoxW(nullptr, widen("The window cannot open: " + e.error().message()).c_str(),
+                  L"NetHack Tiles Client", MB_OK | MB_ICONERROR);
+    }
+#endif
+    return nullptr;
+  }
+}
+
 json not_ported(const std::string& what) {
   throw std::runtime_error(what + " is not ported to the C++ backend yet");
 }
@@ -674,7 +711,9 @@ int main() {
     std::cerr << "[app] " << startup_error << "\n";
   }
 
-  webview::webview view(true, nullptr);
+  const auto window = open_window();
+  if (!window) return 1;
+  webview::webview& view = *window;
   view.set_title("NetHack Tiles Client (C++)");
   view.set_size(1100, 760, WEBVIEW_HINT_NONE);
 

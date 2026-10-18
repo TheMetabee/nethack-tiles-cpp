@@ -44,6 +44,24 @@ To inspect the page, set `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` to
 `--remote-debugging-port=9222` before starting the app, then open
 `edge://inspect` or `chrome://inspect`.
 
+## Package (Windows)
+
+```sh
+cmake --build build --config Release
+cpack --config build/CPackConfig.cmake -C Release -B build/package
+```
+
+This makes `build/package/nethack-tiles-<version>-windows-x64.zip`: one
+folder with `nethack_tiles.exe`, `ssh.dll`, the tile sheets, the built
+frontend, `LICENSE.txt` and `THIRD_PARTY_NOTICES.txt`. Unzip it anywhere and
+run the exe. `cmake/notices.cmake` writes the notices from the licence files
+of everything bundled.
+
+A Release exe has the app icon and version details and opens no console
+window, as the Rust app's release build does. To see its log, run a Debug
+build, which keeps the console. If the WebView2 runtime is missing, the app
+says so and offers Microsoft's download page.
+
 ## CI
 
 `.github/workflows/ci.yml` runs on every push to `main` and every pull
@@ -52,7 +70,7 @@ request:
 | Job | What it checks |
 |---|---|
 | Frontend | Types, the bundle and the Vitest tests |
-| Windows | The whole app in Release, with the frontend built in, and every test. The build is kept as the `nethack-tiles-windows` artifact for 14 days: unzip it and run `nethack_tiles.exe`. |
+| Windows | The whole app in Release, with the frontend built in, every test, and the ZIP package. The app's files are kept as the `nethack-tiles-windows` artifact for 14 days: unzip it and run `nethack_tiles.exe`. |
 | Core (Linux, macOS) | The libraries, tools and tests, with `-DNH_BUILD_APP=OFF` |
 
 `NH_BUILD_APP=OFF` builds everything except the app itself. Use it where

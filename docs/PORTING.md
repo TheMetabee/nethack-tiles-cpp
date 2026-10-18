@@ -50,7 +50,14 @@ Proven end to end in the spike (Windows):
 - CI (`.github/workflows/ci.yml`): the frontend, the whole app on Windows,
   and the libraries and tests on Linux and macOS. The Linux job was run in
   WSL Ubuntu 24.04 (GCC 13.3) first: 213 cases pass, the 219 less the six
-  Credential Manager cases. macOS is not checked yet.
+  Credential Manager cases. All four jobs pass on GitHub, macOS included.
+- Packaging (Windows): `cpack` makes a ZIP with only the app, its licence
+  and `THIRD_PARTY_NOTICES.txt` (from `cmake/notices.cmake`). The Release
+  exe has the icon and version details, no console window and no browser
+  developer tools. Checked by running the app from the unzipped folder: the
+  page, the tile sheets, the saved profiles and an SSH connect all work.
+  The message box for a missing WebView2 runtime is not tested: WebView2
+  could not be made to fail on this machine short of removing it.
 - A Release build serves the built frontend from disk with no Vite
   (Windows). Checked end to end with the demo session.
 
@@ -86,16 +93,15 @@ redesign.
 | Dialog plugin | `IFileOpenDialog` on Windows; NSOpenPanel and GTK later | Windows done |
 | Opener plugin | `ShellExecuteW`, `open`, `xdg-open` | done |
 | Serving the built frontend | WebView2 `SetVirtualHostNameToFolderMapping`; WKURLSchemeHandler and a WebKitGTK URI scheme later | Windows done |
-| Bundler, notarisation | CPack (WiX, DragNDrop, DEB) and the same notarisation steps | |
+| Bundler, notarisation | CPack: ZIP on Windows now; WiX, DragNDrop, DEB and notarisation later | ZIP done |
 | WebView2 runtime | Ships with Windows 10 and 11; the installer adds Microsoft's bootstrapper for the rest | |
 
 ## Next steps
 
 1. The local Unix transport.
 2. The keychain on macOS (Keychain Services) and Linux (Secret Service).
-3. Packaging: an installer (the Rust app ships an unsigned MSI), the exe
-   icon and version, no console window in Release, and the third-party
-   licence notices. Then a release workflow.
+3. An MSI installer like the Rust app's, then a release workflow that
+   attaches the package to a GitHub release.
 
 ## Notes
 

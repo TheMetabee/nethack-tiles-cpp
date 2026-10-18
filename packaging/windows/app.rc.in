@@ -1,0 +1,36 @@
+// The exe's icon and version details. CMake fills in the @...@ values; see
+// CMakeLists.txt.
+
+#include <winver.h>
+
+// webview 0.12 loads the window icon as IDI_APPLICATION (32512) from the exe,
+// and it is the only icon here, so Explorer and the taskbar use it as well.
+32512 ICON "@NH_ICON@"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+ PRODUCTVERSION @PROJECT_VERSION_MAJOR@,@PROJECT_VERSION_MINOR@,@PROJECT_VERSION_PATCH@,0
+ FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+ FILEFLAGS 0
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+ FILESUBTYPE VFT2_UNKNOWN
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904b0"
+    BEGIN
+      VALUE "FileDescription", "@NH_PRODUCT_NAME@"
+      VALUE "FileVersion", "@PROJECT_VERSION@"
+      VALUE "InternalName", "nethack_tiles"
+      VALUE "LegalCopyright", "Copyright (c) 2026 Ian Langworth and TheMetabee. MIT License."
+      VALUE "OriginalFilename", "nethack_tiles.exe"
+      VALUE "ProductName", "@NH_PRODUCT_NAME@"
+      VALUE "ProductVersion", "@PROJECT_VERSION@"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END

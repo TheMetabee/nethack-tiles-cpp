@@ -166,6 +166,18 @@ if(MSVC)
 endif()
 if(WIN32)
   target_compile_definitions(nethack_tiles PRIVATE NOMINMAX _CRT_SECURE_NO_WARNINGS)
+
+  # The icon and the version details (see packaging/windows/app.rc.in).
+  set(NH_PRODUCT_NAME "NetHack Tiles Client")
+  set(NH_ICON ${CMAKE_SOURCE_DIR}/packaging/windows/app.ico)
+  configure_file(packaging/windows/app.rc.in ${CMAKE_BINARY_DIR}/app.rc @ONLY)
+  target_sources(nethack_tiles PRIVATE ${CMAKE_BINARY_DIR}/app.rc)
+
+  # A Release build opens no console window, as the Rust app's release build
+  # does not. A Debug build keeps the console, which shows the log. Either
+  # way the program starts at main().
+  target_link_options(nethack_tiles PRIVATE /ENTRY:mainCRTStartup
+    $<IF:$<CONFIG:Debug>,/SUBSYSTEM:CONSOLE,/SUBSYSTEM:WINDOWS>)
 endif()
 
 # libssh is a shared library (see above); Windows finds it beside the .exe.
@@ -212,6 +224,50 @@ if(NH_BUILD_FRONTEND)
 endif()
 
 endif()  # NH_BUILD_APP
+
+# --- Package: what a player gets ---------------------------------------------
+#
+#   cmake --build build --config Release
+#   cpack --config build/CPackConfig.cmake -C Release -B build/package
+#
+# Every install rule here is in the `app` component, and the package takes
+# only that component. The fetched libraries' own install rules (headers,
+# static libraries, CMake files) stay out.
+
+if(NH_BUILD_APP)
+  include(cmake/notices.cmake)
+
+  install(TARGETS nethack_tiles RUNTIME DESTINATION . COMPONENT app)
+  if(WIN32)
+    install(FILES $<TARGET_FILE:ssh> DESTINATION . COMPONENT app)
+  endif()
+  install(DIRECTORY assets/ DESTINATION assets COMPONENT app)
+  if(NH_BUILD_FRONTEND)
+    install(DIRECTORY ${FRONTEND_DIR}/dist/ DESTINATION frontend COMPONENT app)
+  endif()
+  install(FILES LICENSE DESTINATION . RENAME LICENSE.txt COMPONENT app)
+  install(FILES ${CMAKE_BINARY_DIR}/THIRD_PARTY_NOTICES.txt DESTINATION . COMPONENT app)
+
+  set(CPACK_PACKAGE_NAME "nethack-tiles")
+  set(CPACK_PACKAGE_VENDOR "TheMetabee")
+  set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Play NetHack on public servers with graphical tiles")
+  set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/TheMetabee/nethack-tiles-cpp")
+  set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
+  set(CPACK_PACKAGE_INSTALL_DIRECTORY "NetHack Tiles Client")
+  set(CPACK_RESOURCE_FILE_LICENSE ${CMAKE_SOURCE_DIR}/LICENSE)
+  set(CPACK_GENERATOR ZIP)
+  set(CPACK_COMPONENTS_ALL app)
+  set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
+  set(CPACK_COMPONENTS_GROUPING ALL_COMPONENTS_IN_ONE)
+  # One name for the file and the folder inside it.
+  set(CPACK_PACKAGE_FILE_NAME "nethack-tiles-${PROJECT_VERSION}-windows-x64")
+  set(CPACK_ARCHIVE_FILE_NAME ${CPACK_PACKAGE_FILE_NAME})
+  # Unzips into one folder of that name, not loose files. A package made
+  # from components reads the second variable.
+  set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY ON)
+  set(CPACK_COMPONENT_INCLUDE_TOPLEVEL_DIRECTORY ON)
+  include(CPack)
+endif()
 
 # --- Developer tools --------------------------------------------------------
 

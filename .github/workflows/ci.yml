@@ -60,15 +60,13 @@ jobs:
       - name: Tests
         run: ctest --test-dir build -C Release --output-on-failure
 
-      # A build to try from any push: unzip it and run nethack_tiles.exe.
+      # The ZIP a release would ship, so a broken package rule fails here.
+      - name: Package
+        run: cpack --config build/CPackConfig.cmake -C Release -B build/package
+      # A build to try from any push: unzip it and run nethack_tiles.exe. It
+      # is the same set of files as the ZIP, from the same install rules.
       - name: Collect the app
-        shell: pwsh
-        run: |
-          $out = "nethack-tiles-windows"
-          New-Item -ItemType Directory $out | Out-Null
-          Copy-Item build/Release/nethack_tiles.exe, build/Release/ssh.dll $out
-          Copy-Item -Recurse build/Release/assets, build/Release/frontend $out
-          Copy-Item LICENSE $out
+        run: cmake --install build --config Release --component app --prefix nethack-tiles-windows
       - uses: actions/upload-artifact@v4
         with:
           name: nethack-tiles-windows
