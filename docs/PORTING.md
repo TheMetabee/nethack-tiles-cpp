@@ -48,6 +48,16 @@ Proven end to end in the spike (Windows):
   checked end to end: the frontend writes its files through C++ into a
   directory with a non-ASCII name.
 - Native folder picker (Windows) and opening links in the browser.
+- Linux: the whole app builds with WebKitGTK 4.1 (no changes needed) and
+  runs in WSLg on Ubuntu 24.04. It reads `~/.config/nethack-tiles/profiles.toml`,
+  draws the server list and tiles, connects to Hardfought over SSH and takes
+  keys. A Release build serves the built frontend from disk under
+  `nethack-tiles://app/` (a WebKitGTK URI scheme; `core/static_files` maps
+  each request to a file and refuses any path out of the folder), and finds
+  its assets through `/proc/self/exe` wherever it is started from. In WSL, set
+  `WEBKIT_DISABLE_DMABUF_RENDERER=1` (WSL has no GPU buffer sharing; without
+  it the window stays blank), and start the app detached with `setsid`, or
+  WebKit's page process ends with the WSL command and the window freezes.
 - CI (`.github/workflows/ci.yml`): the frontend, the whole app on Windows,
   and the libraries and tests on Linux and macOS. The Linux job was run in
   WSL Ubuntu 24.04 (GCC 13.3) first: 213 cases pass, the 219 less the six
@@ -96,7 +106,7 @@ redesign.
 | `invoke` and `emit` | `Bridge` (`bind`, `resolve`, `dispatch`, `eval`) and nlohmann/json | done |
 | Dialog plugin | `IFileOpenDialog` on Windows; NSOpenPanel and GTK later | Windows done |
 | Opener plugin | `ShellExecuteW`, `open`, `xdg-open` | done |
-| Serving the built frontend | WebView2 `SetVirtualHostNameToFolderMapping`; WKURLSchemeHandler and a WebKitGTK URI scheme later | Windows done |
+| Serving the built frontend | WebView2 `SetVirtualHostNameToFolderMapping`; a WebKitGTK URI scheme; WKURLSchemeHandler later | Windows and Linux done |
 | Bundler, notarisation | CPack ZIP on Windows (portable, no installer); macOS and Linux packages later | Windows done |
 | WebView2 runtime | Ships with Windows 10 and 11; the installer adds Microsoft's bootstrapper for the rest | |
 
@@ -104,6 +114,8 @@ redesign.
 
 1. The local Unix transport.
 2. The keychain on macOS (Keychain Services) and Linux (Secret Service).
+3. Serving the built frontend from disk on macOS (a WKURLSchemeHandler), and
+   `exe_dir()` there (`_NSGetExecutablePath`).
 
 ## Notes
 

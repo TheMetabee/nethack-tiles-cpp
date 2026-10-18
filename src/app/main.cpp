@@ -30,6 +30,7 @@
 #include "core/keychain.hpp"
 #include "core/profiles.hpp"
 #include "core/statelog.hpp"
+#include "core/static_files.hpp"
 #include "core/tileset.hpp"
 #include "net/ssh.hpp"
 
@@ -48,12 +49,19 @@ namespace {
 
 // --- Files ------------------------------------------------------------------
 
+// The folder the executable is in, where its assets and frontend are.
 fs::path exe_dir() {
 #ifdef _WIN32
   wchar_t buffer[MAX_PATH];
   const DWORD n = GetModuleFileNameW(nullptr, buffer, MAX_PATH);
   if (n > 0 && n < MAX_PATH) return fs::path(buffer).parent_path();
+#elif defined(__linux__)
+  std::error_code error;
+  const fs::path self = fs::read_symlink("/proc/self/exe", error);
+  if (!error) return self.parent_path();
 #endif
+  // Wrong when the app is started from another folder. macOS needs
+  // _NSGetExecutablePath here, which is not written yet.
   return fs::current_path();
 }
 
@@ -560,10 +568,41 @@ std::optional<std::string> pick_folder(HWND owner, const std::string& title) {
 
 // --- The page -----------------------------------------------------------------
 
+// The scheme the built frontend is served under on Linux. WebKitGTK has no
+// folder mapping like WebView2's, so the app answers each request itself.
+[[maybe_unused]] constexpr const char* kAppScheme = "nethack-tiles";
+
+#if defined(__linux__)
+
+// Answers one request from the page with a file from the folder in `data`.
+void serve_request(WebKitURISchemeRequest* request, gpointer data) {
+  const auto& root = *static_cast<const fs::path*>(data);
+  const auto file = nh::resolve_static_file(root, webkit_uri_scheme_request_get_path(request));
+  std::string bytes;
+  if (file) {
+    std::ifstream in(file->path, std::ios::binary);
+    std::ostringstream buffer;
+    buffer << in.rdbuf();
+    if (in) bytes = buffer.str();
+  }
+  if (!file || bytes.empty()) {
+    GError* error = g_error_new_literal(G_IO_ERROR, G_IO_ERROR_NOT_FOUND, "no such file");
+    webkit_uri_scheme_request_finish_error(request, error);
+    g_error_free(error);
+    return;
+  }
+  GBytes* body = g_bytes_new(bytes.data(), bytes.size());
+  GInputStream* stream = g_memory_input_stream_new_from_bytes(body);
+  webkit_uri_scheme_request_finish(request, stream, static_cast<gint64>(bytes.size()), file->mime);
+  g_object_unref(stream);
+  g_bytes_unref(body);
+}
+#endif
+
 // The origin the built frontend is served from. `.example` is reserved and
 // never resolves on a network, and Microsoft's WebView2 samples use it for
 // this job.
-constexpr const char* kAppHost = "nethack-tiles.example";
+[[maybe_unused]] constexpr const char* kAppHost = "nethack-tiles.example";
 
 // Serves `folder` at https://<kAppHost>/ inside the webview, as Tauri serves
 // its `frontendDist`. The files never go through a socket, so no other
@@ -590,9 +629,23 @@ void serve_folder(webview::webview& view, const fs::path& folder) {
       widen(kAppHost).c_str(), folder.c_str(), COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_DENY);
   core3->Release();
   if (FAILED(mapped)) throw std::runtime_error("the webview refused to serve " + folder.string());
+#elif defined(__linux__)
+  const auto controller = view.browser_controller();
+  if (!controller.ok()) throw std::runtime_error("the webview is not ready");
+  WebKitWebContext* context =
+      webkit_web_view_get_context(WEBKIT_WEB_VIEW(controller.value()));
+  // Registered before the first page loads, as WebKit requires. The folder
+  // lives as long as the context, which frees it.
+  webkit_web_context_register_uri_scheme(
+      context, kAppScheme, serve_request, new fs::path(folder),
+      [](gpointer data) { delete static_cast<fs::path*>(data); });
+  // Secure, so the page is a secure context as on Windows' https origin.
+  // CORS-enabled, so Vite's `<script type="module" crossorigin>` loads.
+  WebKitSecurityManager* security = webkit_web_context_get_security_manager(context);
+  webkit_security_manager_register_uri_scheme_as_secure(security, kAppScheme);
+  webkit_security_manager_register_uri_scheme_as_cors_enabled(security, kAppScheme);
 #else
-  // WKWebView needs a WKURLSchemeHandler and WebKitGTK a URI scheme. Neither
-  // is written yet.
+  // WKWebView needs a WKURLSchemeHandler, which is not written yet.
   (void)view;
   (void)folder;
   throw std::runtime_error(
@@ -615,7 +668,11 @@ std::string frontend_url(webview::webview& view, const fs::path& dist) {
                              ". Build the frontend target, or set NH_FRONTEND_URL.");
   }
   serve_folder(view, dist);
+#ifdef _WIN32
   return std::string("https://") + kAppHost + "/index.html";
+#else
+  return std::string(kAppScheme) + "://app/index.html";
+#endif
 #endif
 }
 
@@ -645,10 +702,15 @@ void open_url(const std::string& url) {
   }
 #ifdef _WIN32
   ShellExecuteW(nullptr, L"open", widen(url).c_str(), nullptr, nullptr, SW_SHOWNORMAL);
-#elif defined(__APPLE__)
-  std::system(("open '" + url + "'").c_str());
 #else
-  std::system(("xdg-open '" + url + "'").c_str());
+#if defined(__APPLE__)
+  const std::string command = "open '" + url + "'";
+#else
+  const std::string command = "xdg-open '" + url + "'";
+#endif
+  if (std::system(command.c_str()) != 0) {
+    throw std::runtime_error("could not open the link in a browser");
+  }
 #endif
 }
 

@@ -53,6 +53,26 @@ To inspect the page, set `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` to
 `--remote-debugging-port=9222` before starting the app, then open
 `edge://inspect` or `chrome://inspect`.
 
+## Run on Linux
+
+Install WebKitGTK's development files (Ubuntu 24.04), then build as above:
+
+```sh
+sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j
+build/nethack_tiles
+```
+
+A Release build serves `build/frontend/` itself, under `nethack-tiles://app/`.
+The frontend build needs Node.js; without it, configure with
+`-DNH_BUILD_FRONTEND=OFF` and copy a `frontend/dist` built elsewhere to
+`build/frontend`. The keychain and local play are not ported to Linux yet.
+
+In WSL, start the app with `WEBKIT_DISABLE_DMABUF_RENDERER=1`, or its window
+stays blank, and detached (`setsid nohup ... &`), or WebKit's page process
+ends with the WSL command and the window stops reacting.
+
 ## Package (Windows)
 
 ```sh

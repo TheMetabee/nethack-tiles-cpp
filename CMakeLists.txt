@@ -123,6 +123,7 @@ add_library(nethack_core STATIC
   src/core/keychain.cpp
   src/core/profiles.cpp
   src/core/statelog.cpp
+  src/core/static_files.cpp
   src/core/stb.cpp
   src/core/tileset.cpp
   src/core/tilesrc.cpp)
@@ -296,6 +297,7 @@ add_executable(core_tests
   tests/profiles_test.cpp
   tests/ssh_test.cpp
   tests/statelog_test.cpp
+  tests/static_files_test.cpp
   tests/tileset_test.cpp
   tests/tilesrc_test.cpp)
 target_link_libraries(core_tests PRIVATE nethack_core nethack_net doctest::doctest_with_main)
