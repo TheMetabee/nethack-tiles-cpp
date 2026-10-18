@@ -55,10 +55,11 @@ To inspect the page, set `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` to
 
 ## Run on Linux
 
-Install WebKitGTK's development files (Ubuntu 24.04), then build as above:
+Install the development files for WebKitGTK and libsecret (Ubuntu 24.04),
+then build as above:
 
 ```sh
-sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev
+sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsecret-1-dev
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 build/nethack_tiles
@@ -71,7 +72,8 @@ A Release build serves `build/frontend/` itself, under `nethack-tiles://app/`.
 the licences. It needs WebKitGTK 4.1 and glibc 2.39 (Ubuntu 24.04) or newer.
 The frontend build needs Node.js; without it, configure with
 `-DNH_BUILD_FRONTEND=OFF` and copy a `frontend/dist` built elsewhere to
-`build/frontend`. The keychain and local play are not ported to Linux yet.
+`build/frontend`. Game passwords go to the desktop keyring through libsecret
+(the Secret Service). Local play is not ported to Linux yet.
 
 In WSL, start the app with `WEBKIT_DISABLE_DMABUF_RENDERER=1`, or its window
 stays blank, and detached (`setsid nohup ... &`), or WebKit's page process

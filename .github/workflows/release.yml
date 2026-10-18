@@ -75,10 +75,10 @@ jobs:
       - uses: actions/checkout@v5
         with:
           ref: ${{ env.TAG }}
-      - name: WebKitGTK development files
+      - name: Linux development files
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsecret-1-dev
       - uses: pnpm/action-setup@v4
         with:
           package_json_file: frontend/package.json
@@ -147,9 +147,10 @@ jobs:
           app says so and offers the download page.
 
           **Linux (64-bit):** unpack `nethack-tiles-*-linux-x64.tar.gz` and run
-          `./nethack_tiles` in its folder. It needs WebKitGTK 4.1 (on Ubuntu
-          24.04 or newer: `sudo apt install libwebkit2gtk-4.1-0`). Game passwords
-          are not saved between runs on Linux yet.
+          `./nethack_tiles` in its folder. It needs WebKitGTK 4.1 and libsecret
+          (on Ubuntu 24.04 or newer: `sudo apt install libwebkit2gtk-4.1-0
+          libsecret-1-0`). Game passwords are kept in your desktop's keyring
+          (GNOME Keyring, KWallet and others).
           EOF
           )
           # A rerun for the same tag replaces the files instead of failing on

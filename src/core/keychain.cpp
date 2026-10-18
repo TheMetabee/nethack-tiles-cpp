@@ -4,6 +4,8 @@
 #include <windows.h>
 // After windows.h, which it depends on.
 #include <wincred.h>
+#elif defined(__linux__)
+#include <libsecret/secret.h>
 #endif
 
 namespace nh {
@@ -63,6 +65,10 @@ struct CredentialPtr {
 
 std::string KeychainSecrets::target_name(const std::string& profile_id) const {
   return profile_id + "." + service_;
+}
+
+std::string KeychainSecrets::item_label(const std::string& profile_id) const {
+  return "keyring:" + profile_id + "@" + service_;
 }
 
 #ifdef _WIN32
@@ -134,6 +140,71 @@ void KeychainSecrets::delete_password(const std::string& profile_id) {
     const DWORD error = GetLastError();
     if (error != ERROR_NOT_FOUND) fail(system_message(error));
   }
+}
+
+#elif defined(__linux__)
+
+namespace {
+
+// The two attributes the Rust store's items have. DONT_MATCH_NAME: libsecret
+// adds an xdg:schema attribute to what it stores, and with this flag a
+// lookup or a clear also finds the Rust store's items, which have none.
+const SecretSchema* schema() {
+  static const SecretSchema kSchema = {
+      "io.statico.nethack-tiles.Password",
+      SECRET_SCHEMA_DONT_MATCH_NAME,
+      {
+          {"service", SECRET_SCHEMA_ATTRIBUTE_STRING},
+          {"username", SECRET_SCHEMA_ATTRIBUTE_STRING},
+          {nullptr, SECRET_SCHEMA_ATTRIBUTE_STRING},
+      },
+      0, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
+  return &kSchema;
+}
+
+[[noreturn]] void fail_with(GError* error) {
+  const std::string message = error->message;
+  g_error_free(error);
+  fail(message);
+}
+
+}  // namespace
+
+bool KeychainSecrets::available() { return true; }
+
+void KeychainSecrets::set_password(const std::string& profile_id, const std::string& password) {
+  GError* error = nullptr;
+  // Remove every item for this profile first. The Rust store refuses a
+  // search that finds two items, and a plain store here would add a second
+  // one beside an item the Rust app made, since that item has no xdg:schema.
+  secret_password_clear_sync(schema(), nullptr, &error, "service", service_.c_str(), "username",
+                             profile_id.c_str(), nullptr);
+  if (error) fail_with(error);
+  secret_password_store_sync(schema(), SECRET_COLLECTION_DEFAULT, item_label(profile_id).c_str(),
+                             password.c_str(), nullptr, &error, "service", service_.c_str(),
+                             "username", profile_id.c_str(), nullptr);
+  if (error) fail_with(error);
+}
+
+std::optional<std::string> KeychainSecrets::get_password(const std::string& profile_id) {
+  GError* error = nullptr;
+  gchar* found = secret_password_lookup_sync(schema(), nullptr, &error, "service",
+                                             service_.c_str(), "username", profile_id.c_str(),
+                                             nullptr);
+  if (error) fail_with(error);
+  if (!found) return std::nullopt;
+  std::string password = found;
+  // Clears the copy libsecret made before it frees it.
+  secret_password_free(found);
+  return password;
+}
+
+void KeychainSecrets::delete_password(const std::string& profile_id) {
+  GError* error = nullptr;
+  // No item to delete is not an error: it reports false, not an error.
+  secret_password_clear_sync(schema(), nullptr, &error, "service", service_.c_str(), "username",
+                             profile_id.c_str(), nullptr);
+  if (error) fail_with(error);
 }
 
 #else

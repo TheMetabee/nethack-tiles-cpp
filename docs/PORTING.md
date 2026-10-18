@@ -97,7 +97,7 @@ redesign.
 | `debuglog.rs` | 304 | `core/debuglog`; every session feeds it (`NHTILES_LOG`, `NHTILES_RAW`) | S | done |
 | `session.rs` | 85 | `core/session`: the `Session` interface and its events | S | done |
 | `ssh.rs` | 446 | `net/ssh`: libssh 0.12.2 on mbedTLS 3.6.7, one pump thread per session | M | done (Windows) |
-| `profiles.rs` | 1101 | `core/profiles` (toml++ reads, a writer of its own writes) and `core/keychain` (Windows Credential Manager) | M | done (Windows); Keychain and libsecret later |
+| `profiles.rs` | 1101 | `core/profiles` (toml++ reads, a writer of its own writes) and `core/keychain` (Windows Credential Manager, Linux Secret Service via libsecret) | M | done (Windows, Linux); macOS Keychain later |
 | `local.rs` | 702 | `forkpty` on Unix; Windows stays unsupported (ConPTY later) | M | |
 | `app.rs`, `lib.rs`, `icon.rs` | ~1200 | `src/app/` | | most commands stubbed |
 
@@ -116,7 +116,7 @@ redesign.
 ## Next steps
 
 1. The local Unix transport.
-2. The keychain on macOS (Keychain Services) and Linux (Secret Service).
+2. The keychain on macOS (Keychain Services).
 3. Serving the built frontend from disk on macOS (a WKURLSchemeHandler), and
    `exe_dir()` there (`_NSGetExecutablePath`).
 
@@ -159,6 +159,13 @@ redesign.
   in, and a game over SSH draws its tiles.
 - Not yet checked live: recording an unknown host key (trust on first use)
   and refusing a changed one. The decisions are unit-tested.
+- Linux keychain: libsecret items in the default collection with the Rust
+  store's attributes (`service`, `username`) and label
+  (`keyring:<id>@<service>`). A save clears matching items first, because
+  libsecret adds `xdg:schema` and the Rust store refuses two matches. Checked
+  in WSL: the keychain tests pass against gnome-keyring, items made the Rust
+  way are read and replaced, and a password saved in the app logged in after
+  a restart. CI runs the tests in a private D-Bus session with gnome-keyring.
 - mbedTLS and doctest come as pinned release archives with a SHA-256, not as
   git clones. Both carry test or example files with very long names, and
   git cannot check those out under a deep build directory on Windows

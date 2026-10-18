@@ -15,7 +15,19 @@
 // Source: windows-native-keyring-store 1.1.0, the store keyring 4.1.6 uses in
 // its default `v1` mode (`Store::new()`: no prefix or suffix, "." between).
 //
-// The macOS Keychain and the Linux Secret Service are not ported yet.
+// On Linux it is an item in the Secret Service's default collection (the
+// login keyring of GNOME, KDE and others), through libsecret:
+//
+//   attributes   service = <service>, username = <profile id>
+//   label        "keyring:<profile id>@<service>"
+//   secret       the password as UTF-8 text (text/plain)
+//
+// Source: zbus-secret-service-keyring-store 1.0.0. That store finds an item
+// by those two attributes and refuses a search that finds two, so a save
+// here first removes every item that matches them. libsecret also adds an
+// `xdg:schema` attribute when it stores; the Rust store ignores it.
+//
+// The macOS Keychain is not ported yet.
 
 #include <string>
 
@@ -31,8 +43,12 @@ class KeychainSecrets final : public SecretStore {
   // throws ProfileError(Secret).
   static bool available();
 
-  // The Credential Manager target name for a profile.
+  // The Credential Manager target name for a profile (Windows).
   std::string target_name(const std::string& profile_id) const;
+
+  // The Secret Service item label for a profile (Linux), as the keyring
+  // settings of GNOME and KDE show it.
+  std::string item_label(const std::string& profile_id) const;
 
   void set_password(const std::string& profile_id, const std::string& password) override;
   std::optional<std::string> get_password(const std::string& profile_id) override;

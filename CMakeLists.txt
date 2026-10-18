@@ -135,6 +135,12 @@ if(WIN32)
   # Credential Manager (advapi32) and the config folder (shell32, ole32).
   target_link_libraries(nethack_core PRIVATE advapi32 shell32 ole32)
 endif()
+if(UNIX AND NOT APPLE)
+  # The Secret Service, for the keychain (see src/core/keychain.hpp).
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(LIBSECRET REQUIRED IMPORTED_TARGET libsecret-1)
+  target_link_libraries(nethack_core PRIVATE PkgConfig::LIBSECRET)
+endif()
 if(WIN32)
   target_compile_definitions(nethack_core PRIVATE NOMINMAX _CRT_SECURE_NO_WARNINGS)
 endif()
@@ -323,6 +329,10 @@ add_executable(core_tests
   tests/tileset_test.cpp
   tests/tilesrc_test.cpp)
 target_link_libraries(core_tests PRIVATE nethack_core nethack_net doctest::doctest_with_main)
+if(UNIX AND NOT APPLE)
+  # The keychain tests make Secret Service items as the Rust app does.
+  target_link_libraries(core_tests PRIVATE PkgConfig::LIBSECRET)
+endif()
 if(MSVC)
   target_compile_options(core_tests PRIVATE /W4 /permissive- /utf-8)
 else()

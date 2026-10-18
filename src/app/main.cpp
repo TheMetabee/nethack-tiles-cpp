@@ -2,8 +2,8 @@
 // commands. Replaces the Tauri app shell (src-tauri/src/app.rs).
 //
 // Ported: SSH sessions with the auto-login, saved profiles with passwords in
-// the keychain (Windows), tilesets, custom tilesets, the state log and the
-// debug logs. Not yet: local play, and the keychain on macOS and Linux.
+// the keychain (Windows and Linux), tilesets, custom tilesets, the state log and the
+// debug logs. Not yet: local play, and the keychain on macOS.
 // NH_DEMO=1 replaces SSH with a demo that draws one room.
 
 #include <algorithm>

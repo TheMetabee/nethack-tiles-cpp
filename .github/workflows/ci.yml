@@ -91,12 +91,13 @@ jobs:
             app: "OFF"
     steps:
       - uses: actions/checkout@v5
-      # The same packages the Rust app's CI installs for its Linux build.
-      - name: WebKitGTK development files
-        if: matrix.app == 'ON'
+      # WebKitGTK, as the Rust app's CI installs for its Linux build, and
+      # libsecret for the keychain. gnome-keyring is for the keychain tests.
+      - name: Linux development files
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsecret-1-dev gnome-keyring
       - name: Configure
         run: >
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -104,4 +105,15 @@ jobs:
       - name: Build
         run: cmake --build build --parallel
       - name: Tests
+        if: runner.os != 'Linux'
         run: ctest --test-dir build --output-on-failure
+      # The keychain tests need a Secret Service. This one is a private D-Bus
+      # session with a fresh, unlocked gnome-keyring, as on a desktop after
+      # login. The pause lets it make the login collection and its alias.
+      - name: Tests, with a Secret Service
+        if: runner.os == 'Linux'
+        run: |
+          dbus-run-session -- bash -c '
+            echo -n ci-keyring-password | gnome-keyring-daemon --unlock --components=secrets > /dev/null
+            sleep 1
+            NH_TEST_SECRET_SERVICE=1 ctest --test-dir build --output-on-failure'
