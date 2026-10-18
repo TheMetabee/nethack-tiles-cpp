@@ -62,6 +62,27 @@ window, as the Rust app's release build does. To see its log, run a Debug
 build, which keeps the console. If the WebView2 runtime is missing, the app
 says so and offers Microsoft's download page.
 
+## Releases
+
+A release is the portable ZIP on a GitHub release. There is no installer.
+
+1. Set `VERSION` in `project()` in `CMakeLists.txt`, for example `0.1.0`, and
+   commit it. The ZIP's name and the exe's version details come from there.
+2. Tag that commit with the same version and push the tag:
+
+   ```sh
+   git tag v0.1.0
+   git push origin v0.1.0
+   ```
+
+3. `.github/workflows/release.yml` builds and tests the app, makes the ZIP and
+   attaches it to a **draft** release with notes from the commits since the
+   last release. Check the draft on GitHub, then publish it.
+
+If the tag and `VERSION` differ, the workflow stops and says what to change.
+To build an existing tag again, run the workflow by hand from the Actions tab
+with that tag; it replaces the ZIP on the draft.
+
 ## CI
 
 `.github/workflows/ci.yml` runs on every push to `main` and every pull

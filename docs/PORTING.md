@@ -58,6 +58,9 @@ Proven end to end in the spike (Windows):
   page, the tile sheets, the saved profiles and an SSH connect all work.
   The message box for a missing WebView2 runtime is not tested: WebView2
   could not be made to fail on this machine short of removing it.
+- Releases: a `v*` tag runs `.github/workflows/release.yml`, which attaches
+  the ZIP to a draft GitHub release. The app ships as that portable ZIP only;
+  there is no MSI, by choice.
 - A Release build serves the built frontend from disk with no Vite
   (Windows). Checked end to end with the demo session.
 
@@ -93,15 +96,13 @@ redesign.
 | Dialog plugin | `IFileOpenDialog` on Windows; NSOpenPanel and GTK later | Windows done |
 | Opener plugin | `ShellExecuteW`, `open`, `xdg-open` | done |
 | Serving the built frontend | WebView2 `SetVirtualHostNameToFolderMapping`; WKURLSchemeHandler and a WebKitGTK URI scheme later | Windows done |
-| Bundler, notarisation | CPack: ZIP on Windows now; WiX, DragNDrop, DEB and notarisation later | ZIP done |
+| Bundler, notarisation | CPack ZIP on Windows (portable, no installer); macOS and Linux packages later | Windows done |
 | WebView2 runtime | Ships with Windows 10 and 11; the installer adds Microsoft's bootstrapper for the rest | |
 
 ## Next steps
 
 1. The local Unix transport.
 2. The keychain on macOS (Keychain Services) and Linux (Secret Service).
-3. An MSI installer like the Rust app's, then a release workflow that
-   attaches the package to a GitHub release.
 
 ## Notes
 
