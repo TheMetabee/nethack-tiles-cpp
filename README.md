@@ -34,6 +34,8 @@ cmake --build build --config Release
 build/Release/nethack_tiles.exe
 ```
 
+Set `NH_DEMO=1` to play a demo room in place of SSH, for work on the page.
+
 Run `pnpm install` in `frontend/` once before the first build. To build only
 the C++ side, configure with `-DNH_BUILD_FRONTEND=OFF`. Set
 `NH_FRONTEND_URL` to load another address in any build.
@@ -47,6 +49,8 @@ To inspect the page, set `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` to
 | Path | Contents |
 |---|---|
 | `src/core/` | Pure logic ported from the Rust backend. No UI, no network. |
+| `src/net/` | The SSH transport, on libssh. |
+| `cmake/` | The mbedTLS config for libssh and the libssh fixes. |
 | `src/app/bridge.*` | The command and event channel to the page. |
 | `src/app/main.cpp` | The window, the commands, the demo session. |
 | `tests/` | doctest tests, ported case for case from the Rust tests. |

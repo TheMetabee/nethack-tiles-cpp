@@ -1,10 +1,10 @@
 // Hosts the React + xterm.js frontend in a system webview and answers its
 // commands. Replaces the Tauri app shell (src-tauri/src/app.rs).
 //
-// Spike scope: tilesets, custom tilesets, the state log and default profiles
-// are real; the session is a demo that draws one room through the ported
-// demuxer and echoes keys. SSH, saved profiles and the keychain are not
-// ported yet.
+// Ported: SSH sessions with the auto-login, tilesets, custom tilesets, the
+// state log and the debug logs. Not yet: saved profiles and the keychain
+// (both live in memory for one run), and local play. NH_DEMO=1 replaces SSH
+// with a demo that draws one room.
 
 #include <algorithm>
 #include <atomic>
@@ -24,9 +24,12 @@
 #include "app/bridge.hpp"
 #include "core/demux.hpp"
 #include "core/debuglog.hpp"
+#include "core/game_stream.hpp"
+#include "core/session.hpp"
 #include "core/glyph.hpp"
 #include "core/statelog.hpp"
 #include "core/tileset.hpp"
+#include "net/ssh.hpp"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -208,42 +211,19 @@ std::string demo_screen(int cols, int rows, const std::string& message) {
   return s;
 }
 
-class DemoSession {
+// Draws one room and answers keys, like a game with no network behind it.
+// NH_DEMO=1 selects it in place of SSH, for work on the page.
+class DemoSession final : public nh::Session {
  public:
-  explicit DemoSession(Bridge& bridge) : bridge_(bridge) {}
-  ~DemoSession() { stop(); }
+  DemoSession(int cols, int rows, nh::SessionEvents events)
+      : cols_(cols), rows_(rows), events_(std::move(events)) {}
 
-  void connect(const std::string& where, nh::NetHackVersion version, int cols, int rows,
-               std::uint32_t tile_count) {
-    stop();
-    {
-      std::lock_guard lock(mutex_);
-      version_ = version;
-      demuxer_ = nh::Demuxer{};
-      // Diagnostics, off unless the environment asks for them. See
-      // core/debuglog.hpp.
-      debug_file_ = nh::file_from_env("NHTILES_LOG");
-      debug_ = debug_file_ ? std::make_unique<nh::TileDebugLog>(*debug_file_, tile_count) : nullptr;
-      raw_ = nh::file_from_env("NHTILES_RAW");
-      cols_ = cols;
-      rows_ = rows;
-      message_ = "Hello Valkyrie, welcome to the C++ backend demo! Type any key.";
-    }
-    running_ = true;
-    bridge_.emit("nh://status", {{"state", "connecting"}, {"message", where}});
-    worker_ = std::thread([this, where] {
-      std::this_thread::sleep_for(std::chrono::milliseconds(300));
-      if (!running_) return;
-      bridge_.emit("nh://status", {{"state", "connected"}, {"message", where + " (demo)"}});
-      redraw();
-      bridge_.emit("nh://tiledata-seen", nullptr);
-    });
-  }
+  void start() override { draw(); }
 
-  void write(std::string_view data) {
-    if (!running_) throw std::runtime_error("not connected");
+  void write(std::string bytes) override {
+    if (closed_) throw nh::Disconnected();
     std::string shown;
-    for (const char c : data) {
+    for (const char c : bytes) {
       const auto b = static_cast<unsigned char>(c);
       shown += b >= 0x20 && b < 0x7f ? std::string(1, c) : "^" + std::to_string(b);
     }
@@ -251,59 +231,249 @@ class DemoSession {
       std::lock_guard lock(mutex_);
       message_ = "You pressed: " + shown;
     }
-    redraw();
+    draw();
   }
 
-  // NetHack answers a SIGWINCH by redrawing for the new size.
-  void resize(int cols, int rows) {
+  // NetHack answers a SIGWINCH by drawing again for the new size.
+  void resize(std::uint32_t cols, std::uint32_t rows) override {
+    if (closed_) throw nh::Disconnected();
     {
       std::lock_guard lock(mutex_);
-      cols_ = cols;
-      rows_ = rows;
+      cols_ = static_cast<int>(cols);
+      rows_ = static_cast<int>(rows);
     }
-    if (running_) redraw();
+    draw();
   }
 
+  void disconnect() override {
+    if (closed_.exchange(true)) return;
+    events_(nh::SessionClosed{});
+  }
+
+  bool is_connected() const override { return !closed_; }
+
+ private:
+  void draw() {
+    std::string screen;
+    {
+      std::lock_guard lock(mutex_);
+      screen = demo_screen(cols_, rows_, message_);
+    }
+    events_(nh::SessionData{std::move(screen)});
+  }
+
+  std::mutex mutex_;
+  int cols_;
+  int rows_;
+  std::string message_ = "Hello Valkyrie, welcome to the C++ backend demo! Type any key.";
+  nh::SessionEvents events_;
+  std::atomic<bool> closed_ = false;
+};
+
+// What a connect needs from the profile.
+struct ConnectPlan {
+  std::string host;
+  std::uint16_t port = 22;
+  std::string ssh_user;
+  nh::NetHackVersion version = nh::NetHackVersion::V36;
+  std::optional<nh::AutoLogin> login;
+  std::uint32_t tile_count = 0;
+  std::uint32_t cols = 80;
+  std::uint32_t rows = 24;
+  bool demo = false;
+};
+
+// Owns the one live session and turns its events into page events. Port of
+// the session half of src-tauri/src/app.rs (`session_connect` and
+// `consume_session`).
+//
+// A transport sends events on its own thread. No session call happens under
+// `mutex_`, because a transport can send an event from inside a call, and
+// the event handler takes `mutex_`.
+class SessionRunner {
+ public:
+  explicit SessionRunner(Bridge& bridge) : bridge_(bridge) {}
+
+  ~SessionRunner() {
+    std::shared_ptr<nh::Session> session;
+    {
+      std::lock_guard lock(mutex_);
+      ++generation_;
+      session = std::move(session_);
+    }
+    if (session) session->disconnect();
+    if (connecting_.joinable()) connecting_.join();
+  }
+
+  // Connects on a worker thread, then settles `reply`: the page shows the
+  // game only once the shell is open, and shows the error otherwise.
+  void connect(ConnectPlan plan, Bridge::Reply reply) {
+    drop_retired();
+    std::uint64_t generation = 0;
+    {
+      std::lock_guard lock(mutex_);
+      if (session_ || busy_) throw std::runtime_error("already connected -- disconnect first");
+      busy_ = true;
+      generation = ++generation_;
+      version_ = plan.version;
+      stream_.emplace(plan.version, std::move(plan.login));
+      // Diagnostics, off unless the environment asks for them. See
+      // core/debuglog.hpp.
+      debug_file_ = nh::file_from_env("NHTILES_LOG");
+      debug_ = debug_file_ ? std::make_unique<nh::TileDebugLog>(*debug_file_, plan.tile_count)
+                           : nullptr;
+      raw_ = nh::file_from_env("NHTILES_RAW");
+    }
+    if (connecting_.joinable()) connecting_.join();
+
+    status("connecting", plan.demo ? plan.host + " (demo)"
+                                   : plan.host + ":" + std::to_string(plan.port));
+    connecting_ = std::thread([this, plan = std::move(plan), reply, generation] {
+      const auto events = [this, generation](nh::SessionEvent event) {
+        on_event(generation, std::move(event));
+      };
+      std::shared_ptr<nh::Session> session;
+      try {
+        if (plan.demo) {
+          session = std::make_shared<DemoSession>(static_cast<int>(plan.cols),
+                                                  static_cast<int>(plan.rows), events);
+        } else {
+          auto config = nh::ssh::Config::dgamelaunch(plan.host, plan.port, plan.ssh_user);
+          config.cols = plan.cols;
+          config.rows = plan.rows;
+          session = nh::ssh::connect(config, events);
+        }
+      } catch (const std::exception& e) {
+        {
+          std::lock_guard lock(mutex_);
+          busy_ = false;
+        }
+        status("error", std::string(e.what()));
+        reply(false, e.what());
+        return;
+      }
+      {
+        std::lock_guard lock(mutex_);
+        busy_ = false;
+        if (generation != generation_) return;  // the app is closing
+        session_ = session;
+      }
+      reply(true, nullptr);
+      status("connected", plan.demo ? plan.host + " (demo)" : plan.host);
+      // Only now: game output before this point would reach a page that has
+      // not drawn the terminal yet.
+      session->start();
+    });
+  }
+
+  void write(std::string bytes) { current()->write(std::move(bytes)); }
+
+  void resize(std::uint32_t cols, std::uint32_t rows) { current()->resize(cols, rows); }
+
   void disconnect() {
-    if (!running_) return;
-    stop();
-    bridge_.emit("nh://status", {{"state", "closed"}, {"message", nullptr}});
+    drop_retired();
+    std::shared_ptr<nh::Session> session;
+    {
+      std::lock_guard lock(mutex_);
+      session = session_;
+    }
+    if (session) session->disconnect();
   }
 
  private:
-  void stop() {
-    running_ = false;
-    if (worker_.joinable()) worker_.join();
+  std::shared_ptr<nh::Session> current() {
     std::lock_guard lock(mutex_);
+    if (!session_) throw std::runtime_error("not connected");
+    return session_;
+  }
+
+  void status(const char* state, const std::optional<std::string>& message) {
+    bridge_.emit("nh://status",
+                 {{"state", state}, {"message", message ? json(*message) : json(nullptr)}});
+  }
+
+  void on_event(std::uint64_t generation, nh::SessionEvent event) {
+    std::unique_lock lock(mutex_);
+    if (generation != generation_ || !stream_) return;  // a session already replaced
+
+    if (auto* data = std::get_if<nh::SessionData>(&event)) {
+      if (raw_) {
+        raw_->write(data->bytes.data(), static_cast<std::streamsize>(data->bytes.size()));
+        raw_->flush();
+      }
+      auto out = stream_->feed(data->bytes);
+      if (debug_) debug_->observe(out.items);
+      const auto session = session_;
+      const auto version = version_;
+      lock.unlock();
+
+      if (out.server_version) {
+        if (out.version_warning) std::cerr << "[app] " << *out.version_warning << "\n";
+        bridge_.emit("nh://server-version",
+                     {{"text", out.server_version->text},
+                      {"version", out.server_version->version
+                                      ? json(*out.server_version->version)
+                                      : json(nullptr)},
+                      {"warning", out.version_warning ? json(*out.version_warning)
+                                                      : json(nullptr)}});
+      }
+      if (out.reply && session) {
+        try {
+          session->write(std::move(*out.reply));
+        } catch (const nh::Disconnected&) {
+        }
+      }
+      if (out.login) status(out.login->logged_in ? "info" : "error", out.login->message);
+      if (!out.items.empty()) {
+        json items = json::array();
+        for (const auto& item : out.items) items.push_back(to_json(item, version));
+        bridge_.emit("nh://stream", items);
+      }
+      if (out.tiledata_seen) bridge_.emit("nh://tiledata-seen", nullptr);
+      return;
+    }
+
+    if (const auto* message = std::get_if<nh::SessionStatus>(&event)) {
+      const std::string text = message->message;
+      lock.unlock();
+      status("info", text);
+      return;
+    }
+
+    // Closed. The session cannot be destroyed here: this can be its own
+    // thread, which its destructor joins. It waits in `retired_` instead.
     if (debug_) debug_->summarize();
     debug_.reset();
     debug_file_.reset();
     raw_.reset();
+    stream_.reset();
+    if (session_) retired_.push_back(std::move(session_));
+    const auto reason = std::get<nh::SessionClosed>(event).reason;
+    lock.unlock();
+    status("closed", reason);
   }
 
-  void redraw() {
-    std::lock_guard lock(mutex_);
-    const std::string bytes = demo_screen(cols_, rows_, message_);
-    if (raw_) raw_->write(bytes.data(), static_cast<std::streamsize>(bytes.size())).flush();
-    const auto decoded = demuxer_.feed(bytes);
-    if (debug_) debug_->observe(decoded);
-    json items = json::array();
-    for (const auto& item : decoded) items.push_back(to_json(item, version_));
-    bridge_.emit("nh://stream", items);
+  // Destroys sessions that have ended. Only the UI thread calls it.
+  void drop_retired() {
+    std::vector<std::shared_ptr<nh::Session>> retired;
+    {
+      std::lock_guard lock(mutex_);
+      retired.swap(retired_);
+    }
   }
 
   Bridge& bridge_;
   std::mutex mutex_;
-  nh::Demuxer demuxer_;
+  std::shared_ptr<nh::Session> session_;
+  std::vector<std::shared_ptr<nh::Session>> retired_;
+  std::optional<nh::GameStream> stream_;
+  nh::NetHackVersion version_ = nh::NetHackVersion::V36;
   std::unique_ptr<std::ofstream> debug_file_;
   std::unique_ptr<nh::TileDebugLog> debug_;
   std::unique_ptr<std::ofstream> raw_;
-  std::thread worker_;
-  std::atomic<bool> running_ = false;
-  nh::NetHackVersion version_ = nh::NetHackVersion::V36;
-  int cols_ = 80;
-  int rows_ = 24;
-  std::string message_;
+  std::thread connecting_;
+  std::uint64_t generation_ = 0;
+  bool busy_ = false;
 };
 
 // --- Native integrations ----------------------------------------------------
@@ -470,7 +640,10 @@ int main() {
   view.set_size(1100, 760, WEBVIEW_HINT_NONE);
 
   Bridge bridge(view);
-  DemoSession session(bridge);
+  SessionRunner session(bridge);
+  // Game passwords by profile id. In memory only until the keychain is
+  // ported, so the auto-login works for this run of the app.
+  std::map<std::string, std::string> passwords;
 
   const auto find_profile = [&](const std::string& id) -> json& {
     for (auto& p : profiles) {
@@ -481,7 +654,9 @@ int main() {
 
   bridge.command("list_profiles", [&](const json&) { return profiles; });
   bridge.command("last_used_profile", [](const json&) { return json(nullptr); });
-  bridge.command("has_saved_password", [](const json&) { return json(false); });
+  bridge.command("has_saved_password", [&](const json& args) {
+    return json(passwords.contains(args.at("id").get<std::string>()));
+  });
   bridge.command("save_profile", [&](const json& args) {
     // Kept in memory only until profile storage is ported.
     const json& profile = args.at("profile");
@@ -490,10 +665,16 @@ int main() {
     } catch (const std::runtime_error&) {
       profiles.push_back(profile);
     }
+    // A null password leaves the stored one as it is.
+    if (const auto password = args.find("password");
+        password != args.end() && password->is_string()) {
+      passwords[profile.at("id").get<std::string>()] = password->get<std::string>();
+    }
     return json(nullptr);
   });
   bridge.command("delete_profile", [&](const json& args) {
     const std::string id = args.at("id");
+    passwords.erase(id);
     profiles.erase(std::remove_if(profiles.begin(), profiles.end(),
                                   [&](const json& p) { return p["id"] == id; }),
                    profiles.end());
@@ -533,16 +714,31 @@ int main() {
     return tileset_payload(sheet);
   });
 
-  bridge.command("session_connect", [&](const json& args) {
+  // Resolves once the shell is open, or rejects with the reason: the page
+  // shows the game only after a connect that worked.
+  bridge.command_async("session_connect", [&](const json& args, Bridge::Reply reply) {
     const json& request = args.at("request");
     const json& profile = find_profile(request.at("profileId"));
-    const auto version =
-        profile["version"] == "v50" ? nh::NetHackVersion::V50 : nh::NetHackVersion::V36;
+    if (profile.value("transport", std::string("ssh")) == "local") {
+      not_ported("Local play");
+    }
+    const std::string id = profile.at("id");
     const auto sheet = sheets.find(profile.value("tilesetId", std::string()));
-    const std::uint32_t tile_count =
-        sheet == sheets.end() ? 0 : sheet->second.manifest().tile_count;
-    session.connect(profile["host"].get<std::string>(), version,
-                    request.at("cols").get<int>(), request.at("rows").get<int>(), tile_count);
+    const auto password = passwords.find(id);
+
+    ConnectPlan plan;
+    plan.host = profile.at("host").get<std::string>();
+    plan.port = profile.value("port", std::uint16_t{22});
+    plan.ssh_user = profile.value("sshUser", std::string("nethack"));
+    plan.version = profile.at("version").get<nh::NetHackVersion>();
+    plan.login = nh::autologin_for(
+        false, profile.value("gameUser", std::string()),
+        password == passwords.end() ? std::nullopt : std::optional(password->second));
+    plan.tile_count = sheet == sheets.end() ? 0 : sheet->second.manifest().tile_count;
+    plan.cols = request.at("cols").get<std::uint32_t>();
+    plan.rows = request.at("rows").get<std::uint32_t>();
+    if (const char* demo = std::getenv("NH_DEMO"); demo && *demo) plan.demo = true;
+    session.connect(std::move(plan), reply);
 
     // A new game starts a new state log. Files from the last one would
     // describe a dungeon the player has left.
@@ -555,7 +751,6 @@ int main() {
                   << "\n";
       }
     }
-    return json(nullptr);
   });
   bridge.command("session_write", [&](const json& args) {
     session.write(args.at("data").get<std::string>());
@@ -569,7 +764,7 @@ int main() {
   });
   bridge.command("session_resize", [&](const json& args) {
     std::cerr << "[session] resize " << args.at("cols") << "x" << args.at("rows") << "\n";
-    session.resize(args.at("cols").get<int>(), args.at("rows").get<int>());
+    session.resize(args.at("cols").get<std::uint32_t>(), args.at("rows").get<std::uint32_t>());
     return json(nullptr);
   });
   bridge.command("session_disconnect", [&](const json&) {

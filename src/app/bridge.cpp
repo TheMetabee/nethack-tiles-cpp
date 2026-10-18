@@ -14,6 +14,12 @@ Bridge::Bridge(webview::webview& view) : view_(view) {
 }
 
 void Bridge::command(const std::string& name, Command handler) {
+  commands_[name] = [handler = std::move(handler)](const json& args, Reply reply) {
+    reply(true, handler(args));
+  };
+}
+
+void Bridge::command_async(const std::string& name, AsyncCommand handler) {
   commands_[name] = std::move(handler);
 }
 
@@ -34,7 +40,15 @@ void Bridge::invoke(const std::string& id, const std::string& request) {
 
     const auto found = commands_.find(name);
     if (found == commands_.end()) throw std::runtime_error("unknown command " + name);
-    view_.resolve(id, 0, found->second(args).dump(-1, ' ', true));
+    found->second(args, [this, id, name](bool ok, const json& value) {
+      if (!ok) {
+        std::cerr << "[command] " << name << " failed: " << value.get<std::string>() << "\n";
+      }
+      // Resolve on the UI thread, in order with any events sent before it.
+      view_.dispatch([this, id, ok, result = value.dump(-1, ' ', true)] {
+        view_.resolve(id, ok ? 0 : 1, result);
+      });
+    });
   } catch (const std::exception& error) {
     std::cerr << "[command] " << (name.empty() ? "?" : name) << " failed: " << error.what()
               << "\n";

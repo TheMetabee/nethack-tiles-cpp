@@ -25,17 +25,25 @@ using json = nlohmann::json;
 class Bridge {
  public:
   using Command = std::function<json(const json& args)>;
+  // Settles the page's promise: resolves it with `value`, or rejects it with
+  // the message in `value` when `ok` is false. Safe from any thread, once.
+  using Reply = std::function<void(bool ok, const json& value)>;
+  using AsyncCommand = std::function<void(const json& args, Reply reply)>;
 
   explicit Bridge(webview::webview& view);
 
   void command(const std::string& name, Command handler);
+  // For work too slow for the UI thread. The handler starts it and returns;
+  // the work calls `reply` when it is done. If the handler throws, the
+  // promise is rejected at once.
+  void command_async(const std::string& name, AsyncCommand handler);
   void emit(const std::string& event, const json& payload);
 
  private:
   void invoke(const std::string& id, const std::string& request);
 
   webview::webview& view_;
-  std::map<std::string, Command> commands_;
+  std::map<std::string, AsyncCommand> commands_;
 };
 
 // The stream is bytes, not UTF-8. JSON carries it as a string whose code
