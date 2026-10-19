@@ -27,7 +27,7 @@ What remains:
 | Piece | Where it is missing | What the port needs |
 |---|---|---|
 | Local play on Windows | Windows; the original has none either | ConPTY. |
-| The folder picker for the state log | Linux and macOS; Windows has one | A GTK dialog on Linux, `NSOpenPanel` on macOS. Until then, set `stateLogDirectory` in `profiles.toml` by hand. |
+| The folder picker for the state log | macOS; Windows and Linux have one | `NSOpenPanel`. Until then, set `stateLogDirectory` in `profiles.toml` by hand. |
 | The app on macOS | macOS builds and tests the core only, local play's pty included | Serving the built frontend from disk (a `WKURLSchemeHandler`), finding the app's folder (`_NSGetExecutablePath`), the Keychain for passwords, then an app bundle, signing and notarisation. |
 
 Not yet checked live, though unit-tested: recording a new server's host key

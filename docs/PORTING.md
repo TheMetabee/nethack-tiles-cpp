@@ -47,7 +47,10 @@ Proven end to end in the spike (Windows):
 - Custom tilesets and the state log work in the app. The state log was
   checked end to end: the frontend writes its files through C++ into a
   directory with a non-ASCII name.
-- Native folder picker (Windows) and opening links in the browser.
+- Native folder picker (Windows `IFileOpenDialog`; Linux `GtkFileChooserNative`,
+  which uses the desktop's portal where there is one) and opening links in
+  the browser. The Linux picker was checked in WSL: a folder chosen in it
+  filled in the state log field.
 - Linux: the whole app builds with WebKitGTK 4.1 (no changes needed) and
   runs in WSLg on Ubuntu 24.04. It reads `~/.config/nethack-tiles/profiles.toml`,
   draws the server list and tiles, connects to Hardfought over SSH and takes
@@ -107,7 +110,7 @@ redesign.
 |---|---|---|
 | Window and webview | webview/webview 0.12.0 | done |
 | `invoke` and `emit` | `Bridge` (`bind`, `resolve`, `dispatch`, `eval`) and nlohmann/json | done |
-| Dialog plugin | `IFileOpenDialog` on Windows; NSOpenPanel and GTK later | Windows done |
+| Dialog plugin | `IFileOpenDialog` on Windows, `GtkFileChooserNative` on Linux; NSOpenPanel later | Windows and Linux done |
 | Opener plugin | `ShellExecuteW`, `open`, `xdg-open` | done |
 | Serving the built frontend | WebView2 `SetVirtualHostNameToFolderMapping`; a WebKitGTK URI scheme; WKURLSchemeHandler later | Windows and Linux done |
 | Bundler, notarisation | CPack: ZIP on Windows, tar.gz on Linux (portable, no installer); macOS later | Windows and Linux done |
@@ -115,12 +118,13 @@ redesign.
 
 ## Next steps
 
-1. The folder picker on Linux (GTK).
-2. The keychain on macOS (Keychain Services).
-3. Serving the built frontend from disk on macOS (a WKURLSchemeHandler), and
+The rest is macOS:
+
+1. Serving the built frontend from disk (a WKURLSchemeHandler), and
    `exe_dir()` there (`_NSGetExecutablePath`).
-4. The folder picker on macOS (NSOpenPanel).
-5. A macOS app bundle, signing and notarisation.
+2. The keychain (Keychain Services).
+3. The folder picker (NSOpenPanel).
+4. An app bundle, signing and notarisation.
 
 ## Notes
 

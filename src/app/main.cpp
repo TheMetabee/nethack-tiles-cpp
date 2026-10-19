@@ -597,6 +597,33 @@ std::optional<std::string> pick_folder(HWND owner, const std::string& title) {
   dialog->Release();
   return chosen;
 }
+#elif defined(__linux__)
+// The desktop's own folder picker where it offers one through the portal,
+// GTK's otherwise. Runs a nested main loop until the player chooses, as the
+// Windows dialog does. Empty if they cancel.
+std::optional<std::string> pick_folder(GtkWindow* owner, const std::string& title) {
+  GtkFileChooserNative* dialog = gtk_file_chooser_native_new(
+      title.c_str(), owner, GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER, "_Choose", "_Cancel");
+  std::optional<std::string> chosen;
+  std::optional<std::string> problem;
+  if (gtk_native_dialog_run(GTK_NATIVE_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
+    if (gchar* path = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog))) {
+      // The page and the profile file hold UTF-8. A name that is not would
+      // not survive the trip, so say so instead of saving a mangled path.
+      if (g_utf8_validate(path, -1, nullptr)) {
+        chosen = path;
+      } else {
+        problem = "the folder's name is not valid UTF-8; choose or rename another folder";
+      }
+      g_free(path);
+    } else {
+      problem = "that is not a folder on this computer";
+    }
+  }
+  g_object_unref(dialog);
+  if (problem) throw std::runtime_error(*problem);
+  return chosen;
+}
 #endif
 
 // --- The page -----------------------------------------------------------------
@@ -959,6 +986,12 @@ int main() {
     const auto window = view.window();
     const auto chosen =
         pick_folder(window.ok() ? static_cast<HWND>(window.value()) : nullptr,
+                    args.value("title", std::string("Choose a folder")));
+    return chosen ? json(*chosen) : json(nullptr);
+#elif defined(__linux__)
+    const auto window = view.window();
+    const auto chosen =
+        pick_folder(window.ok() ? GTK_WINDOW(window.value()) : nullptr,
                     args.value("title", std::string("Choose a folder")));
     return chosen ? json(*chosen) : json(nullptr);
 #else
