@@ -20,13 +20,15 @@ See [docs/PORTING.md](docs/PORTING.md) for what is ported and what is next.
 
 Everything else from the original works on Windows and Linux: SSH play on
 the public servers, the tiles, saved profiles and passwords, custom tile
-sheets and the state log. What remains:
+sheets and the state log. Local play (a NetHack installed on this machine,
+in a pseudo-terminal) works on Linux; as in the original, Windows has none.
+What remains:
 
 | Piece | Where it is missing | What the port needs |
 |---|---|---|
-| Local play (`local.rs`): run a NetHack installed on this machine | All platforms; the app says it is not ported | A pseudo-terminal (`forkpty`) on Linux and macOS. The original does not run local games on Windows either; ConPTY could add it later. |
+| Local play on Windows | Windows; the original has none either | ConPTY. |
 | The folder picker for the state log | Linux and macOS; Windows has one | A GTK dialog on Linux, `NSOpenPanel` on macOS. Until then, set `stateLogDirectory` in `profiles.toml` by hand. |
-| The app on macOS | macOS builds and tests the core only | Serving the built frontend from disk (a `WKURLSchemeHandler`), finding the app's folder (`_NSGetExecutablePath`), the Keychain for passwords, then an app bundle, signing and notarisation. |
+| The app on macOS | macOS builds and tests the core only, local play's pty included | Serving the built frontend from disk (a `WKURLSchemeHandler`), finding the app's folder (`_NSGetExecutablePath`), the Keychain for passwords, then an app bundle, signing and notarisation. |
 
 Not yet checked live, though unit-tested: recording a new server's host key
 on first connect, and refusing a host key that has changed.
@@ -89,7 +91,15 @@ the licences. It needs WebKitGTK 4.1 and glibc 2.39 (Ubuntu 24.04) or newer.
 The frontend build needs Node.js; without it, configure with
 `-DNH_BUILD_FRONTEND=OFF` and copy a `frontend/dist` built elsewhere to
 `build/frontend`. Game passwords go to the desktop keyring through libsecret
-(the Secret Service). Local play is not ported to Linux yet.
+(the Secret Service).
+
+Local play runs the NetHack found on `PATH` or in the usual places
+(`/usr/games` among them), for example from `sudo apt install
+nethack-console`. On a first run the app adds a "This computer" profile when
+it finds one; otherwise add a server and choose "NetHack installed on this
+computer". Disconnecting hangs up on the game, which NetHack answers by
+saving. Debian's build has no tiles compiled in, so it plays in ASCII. To run
+the test that starts the installed NetHack, set `NH_TEST_LOCAL_NETHACK=1`.
 
 In WSL, start the app with `WEBKIT_DISABLE_DMABUF_RENDERER=1`, or its window
 stays blank, and detached (`setsid nohup ... &`), or WebKit's page process
@@ -157,7 +167,7 @@ WebKitGTK.
 | Path | Contents |
 |---|---|
 | `src/core/` | Pure logic ported from the Rust backend. No UI, no network. |
-| `src/net/` | The SSH transport, on libssh. |
+| `src/net/` | The transports: SSH on libssh, and local play in a pty. |
 | `cmake/` | The mbedTLS config for libssh and the libssh fixes. |
 | `src/app/bridge.*` | The command and event channel to the page. |
 | `src/app/main.cpp` | The window, the commands, the demo session. |

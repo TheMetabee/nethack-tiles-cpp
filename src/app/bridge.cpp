@@ -33,10 +33,19 @@ void Bridge::emit(const std::string& event, const json& payload) {
 void Bridge::invoke(const std::string& id, const std::string& request) {
   std::string name;
   try {
-    // The page passes (command, args), which webview sends as a JSON array.
+    // The page passes (command, argsJson), which webview sends as a JSON
+    // array. argsJson is the arguments as plain-ASCII JSON text (see
+    // asciiJson in backend.ts): webview's own parser drops a call that
+    // holds a raw DEL, which is what Backspace sends.
     const json call = json::parse(request);
     name = call.at(0).get<std::string>();
-    const json args = call.size() > 1 && call[1].is_object() ? call[1] : json::object();
+    json args = json::object();
+    if (call.size() > 1 && call[1].is_string()) {
+      args = json::parse(call[1].get<std::string>());
+    } else if (call.size() > 1 && call[1].is_object()) {
+      args = call[1];
+    }
+    if (!args.is_object()) throw std::runtime_error("the arguments are not a JSON object");
 
     const auto found = commands_.find(name);
     if (found == commands_.end()) throw std::runtime_error("unknown command " + name);

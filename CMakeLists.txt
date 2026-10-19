@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(nethack_tiles_cpp VERSION 0.2.1 LANGUAGES C CXX)
+project(nethack_tiles_cpp VERSION 0.3.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -150,10 +150,17 @@ else()
   target_compile_options(nethack_core PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
-# --- Net: the SSH transport, on libssh -----------------------------------------
+# --- Net: the transports. SSH on libssh, and local play in a pty -------------
 
-add_library(nethack_net STATIC src/net/ssh.cpp)
+add_library(nethack_net STATIC src/net/local.cpp src/net/ssh.cpp)
 target_link_libraries(nethack_net PUBLIC nethack_core PRIVATE ssh::ssh)
+if(UNIX AND NOT APPLE)
+  # openpty. glibc 2.34 moved it into libc; older ones keep it in libutil.
+  target_link_libraries(nethack_net PRIVATE util)
+endif()
+if(WIN32)
+  target_compile_definitions(nethack_net PRIVATE NOMINMAX _CRT_SECURE_NO_WARNINGS)
+endif()
 if(MSVC)
   target_compile_options(nethack_net PRIVATE /W4 /permissive- /utf-8)
 else()
@@ -321,6 +328,7 @@ add_executable(core_tests
   tests/game_stream_test.cpp
   tests/glyph_test.cpp
   tests/keychain_test.cpp
+  tests/local_test.cpp
   tests/profiles_rust_fixtures_test.cpp
   tests/profiles_test.cpp
   tests/ssh_test.cpp

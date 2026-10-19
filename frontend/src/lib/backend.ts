@@ -2,8 +2,8 @@
  * Typed wrappers over the C++ backend's command and event surface.
  *
  * The backend hosts this page in a system webview and binds one function,
- * `window.__nh_invoke(command, args)`, which resolves with the command's JSON
- * result. Events go the other way: the backend calls `window.__nh_emit(event,
+ * `window.__nh_invoke(command, argsJson)`, which resolves with the command's
+ * JSON result. `argsJson` is the arguments as JSON text; see `asciiJson`. Events go the other way: the backend calls `window.__nh_emit(event,
  * payload)`, and the listeners registered here receive the payload.
  */
 
@@ -16,7 +16,7 @@ import type {
   TilesetPayload,
 } from "./protocol";
 
-type Invoke = (command: string, args: Record<string, unknown>) => Promise<unknown>;
+type Invoke = (command: string, argsJson: string) => Promise<unknown>;
 type Listener = (payload: unknown) => void;
 export type UnlistenFn = () => void;
 
@@ -47,6 +47,22 @@ window.__nh_emit = (event, payload) => {
 };
 
 /**
+ * JSON text with every character outside printable ASCII written as `\uXXXX`.
+ *
+ * webview checks each call with a small JSON parser of its own before the
+ * backend sees it, and that parser rejects a raw DEL (0x7f), which
+ * `JSON.stringify` leaves as it is. DEL is what Backspace sends, so a plain
+ * call lost every Backspace. Escaped, the call is plain ASCII, and the
+ * backend's own parser reads the escapes back.
+ */
+export function asciiJson(value: unknown): string {
+  return JSON.stringify(value).replace(
+    /[\u007f-￿]/g,
+    (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"),
+  );
+}
+
+/**
  * Calls a backend command. Without the bridge (the page opened in a plain
  * browser) every command rejects instead of throwing, so callers that already
  * handle a failed command handle this too.
@@ -54,7 +70,7 @@ window.__nh_emit = (event, payload) => {
 function invoke<T>(command: string, args: Record<string, unknown> = {}): Promise<T> {
   const bridge = window.__nh_invoke;
   if (!bridge) return Promise.reject(new Error(`no backend for ${command}`));
-  return bridge(command, args) as Promise<T>;
+  return bridge(command, asciiJson(args)) as Promise<T>;
 }
 
 export const listProfiles = () => invoke<Profile[]>("list_profiles");

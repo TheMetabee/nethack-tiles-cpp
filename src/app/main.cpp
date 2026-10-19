@@ -1,9 +1,10 @@
 // Hosts the React + xterm.js frontend in a system webview and answers its
 // commands. Replaces the Tauri app shell (src-tauri/src/app.rs).
 //
-// Ported: SSH sessions with the auto-login, saved profiles with passwords in
-// the keychain (Windows and Linux), tilesets, custom tilesets, the state log and the
-// debug logs. Not yet: local play, and the keychain on macOS.
+// Ported: SSH sessions with the auto-login, local play in a pty (Linux and
+// macOS, as in the Rust app), saved profiles with passwords in the keychain
+// (Windows and Linux), tilesets, custom tilesets, the state log and the debug
+// logs. Not yet: the keychain on macOS.
 // NH_DEMO=1 replaces SSH with a demo that draws one room.
 
 #include <algorithm>
@@ -32,6 +33,7 @@
 #include "core/statelog.hpp"
 #include "core/static_files.hpp"
 #include "core/tileset.hpp"
+#include "net/local.hpp"
 #include "net/ssh.hpp"
 
 #ifdef _WIN32
@@ -140,9 +142,17 @@ nh::ProfileStore open_profiles(const Tilesets& sheets) {
 
   auto store = nh::ProfileStore::load(path, std::move(secrets));
   // Nobody's first run should start on an empty screen: offer the two public
-  // servers, each with the sheet for its release.
+  // servers, each with the sheet for its release, plus this machine's own
+  // NetHack if it has one.
   if (store.is_first_run()) {
-    for (auto profile : nh::default_profiles(std::nullopt)) {
+    std::optional<std::pair<std::filesystem::path, nh::NetHackVersion>> local_game;
+    if (const auto installed = nh::local::find()) {
+      // Ask the binary rather than guess: tile indices are positional, so the
+      // wrong sheet draws the wrong picture for nearly every glyph.
+      local_game.emplace(*installed,
+                         nh::local::probe_version(*installed).value_or(nh::NetHackVersion::V36));
+    }
+    for (auto profile : nh::default_profiles(local_game)) {
       profile.tileset_id = sheet_for_version(sheets, profile.version);
       try {
         store.upsert(std::move(profile));
@@ -322,6 +332,18 @@ struct ConnectPlan {
   std::uint32_t cols = 80;
   std::uint32_t rows = 24;
   bool demo = false;
+  // Play the NetHack on this machine instead of connecting to `host`.
+  bool local = false;
+  // The local NetHack to run. Empty means find one now, so the profile does
+  // not go stale when NetHack is upgraded, moved or installed later.
+  std::string command;
+
+  // What the status bar calls the game.
+  std::string label(bool with_port) const {
+    if (demo) return host + " (demo)";
+    if (local) return command.empty() ? "NetHack on this computer" : command;
+    return with_port ? host + ":" + std::to_string(port) : host;
+  }
 };
 
 // Owns the one live session and turns its events into page events. Port of
@@ -367,8 +389,7 @@ class SessionRunner {
     }
     if (connecting_.joinable()) connecting_.join();
 
-    status("connecting", plan.demo ? plan.host + " (demo)"
-                                   : plan.host + ":" + std::to_string(plan.port));
+    status("connecting", plan.label(true));
     connecting_ = std::thread([this, plan = std::move(plan), reply, generation] {
       const auto events = [this, generation](nh::SessionEvent event) {
         on_event(generation, std::move(event));
@@ -378,6 +399,18 @@ class SessionRunner {
         if (plan.demo) {
           session = std::make_shared<DemoSession>(static_cast<int>(plan.cols),
                                                   static_cast<int>(plan.rows), events);
+        } else if (plan.local) {
+          nh::local::Config config;
+          if (plan.command.empty()) {
+            const auto found = nh::local::find();
+            if (!found) throw nh::local::LocalError::not_found();
+            config.command = *found;
+          } else {
+            config.command = nh::statelog::path_from_utf8(plan.command);
+          }
+          config.cols = static_cast<std::uint16_t>(plan.cols);
+          config.rows = static_cast<std::uint16_t>(plan.rows);
+          session = nh::local::spawn(config, events);
         } else {
           auto config = nh::ssh::Config::dgamelaunch(plan.host, plan.port, plan.ssh_user);
           config.cols = plan.cols;
@@ -400,7 +433,7 @@ class SessionRunner {
         session_ = session;
       }
       reply(true, nullptr);
-      status("connected", plan.demo ? plan.host + " (demo)" : plan.host);
+      status("connected", plan.label(false));
       // Only now: game output before this point would reach a page that has
       // not drawn the terminal yet.
       session->start();
@@ -848,7 +881,7 @@ int main() {
     const nh::Profile* found = profiles->get(id);
     if (!found) throw std::runtime_error("no profile with id \"" + id + "\"");
     const nh::Profile profile = *found;
-    if (profile.transport == nh::Transport::Local) not_ported("Local play");
+    const bool local = profile.transport == nh::Transport::Local;
     const auto sheet = sheets.find(profile.tileset_id);
 
     ConnectPlan plan;
@@ -856,9 +889,12 @@ int main() {
     plan.port = profile.port;
     plan.ssh_user = profile.ssh_user;
     plan.version = profile.version;
+    plan.local = local;
+    plan.command = profile.command;
     // Read whenever a prompt could want it. Whether it is typed is
-    // autologin_for's decision.
-    plan.login = nh::autologin_for(false, profile.game_user, profiles->password(id));
+    // autologin_for's decision. A local game has no prompt to answer.
+    plan.login = local ? std::nullopt
+                       : nh::autologin_for(false, profile.game_user, profiles->password(id));
     plan.tile_count = sheet == sheets.end() ? 0 : sheet->second.manifest().tile_count;
     plan.cols = request.at("cols").get<std::uint32_t>();
     plan.rows = request.at("rows").get<std::uint32_t>();

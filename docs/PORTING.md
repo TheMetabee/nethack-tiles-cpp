@@ -98,8 +98,8 @@ redesign.
 | `session.rs` | 85 | `core/session`: the `Session` interface and its events | S | done |
 | `ssh.rs` | 446 | `net/ssh`: libssh 0.12.2 on mbedTLS 3.6.7, one pump thread per session | M | done (Windows, Linux) |
 | `profiles.rs` | 1101 | `core/profiles` (toml++ reads, a writer of its own writes) and `core/keychain` (Windows Credential Manager, Linux Secret Service via libsecret) | M | done (Windows, Linux); macOS Keychain later |
-| `local.rs` | 702 | `forkpty` on Unix; Windows stays unsupported (ConPTY later) | M | |
-| `app.rs`, `lib.rs`, `icon.rs` | ~1200 | `src/app/` | | done: every command; local play fails with "not ported" |
+| `local.rs` | 702 | `net/local`: `openpty`, `fork` and `execve`, one pump thread on `poll`; Windows stays unsupported (ConPTY later) | M | done (Linux; macOS builds and passes the tests in CI) |
+| `app.rs`, `lib.rs`, `icon.rs` | ~1200 | `src/app/` | | done: every command |
 
 ### Tauri itself
 
@@ -115,14 +115,27 @@ redesign.
 
 ## Next steps
 
-1. The local Unix transport.
+1. The folder picker on Linux (GTK).
 2. The keychain on macOS (Keychain Services).
 3. Serving the built frontend from disk on macOS (a WKURLSchemeHandler), and
    `exe_dir()` there (`_NSGetExecutablePath`).
-4. The folder picker on Linux (GTK) and macOS (NSOpenPanel).
+4. The folder picker on macOS (NSOpenPanel).
 5. A macOS app bundle, signing and notarisation.
 
 ## Notes
+
+- Local play: checked in WSL against Ubuntu's `nethack-console` 3.6.7. The
+  app found it in `/usr/games`, a game was played, and Disconnect left a save
+  file. The C++ session differs from the Rust one in three small ways: a hang
+  up the player asked for closes with no error; the `--version` probe kills a
+  probe that runs too long instead of leaving a thread behind; and a failed
+  `exec` is reported through a close-on-exec pipe, so a wrong command is an
+  error at connect rather than a session that closes at once.
+- Each command's arguments cross the bridge as JSON text with everything
+  outside printable ASCII escaped (`asciiJson` in `backend.ts`). webview
+  checks every call with its own small JSON parser, which rejects a raw DEL
+  (0x7f). `JSON.stringify` leaves DEL as it is, and DEL is what Backspace
+  sends, so before this every Backspace was dropped, on every platform.
 
 - The frontend's own resize fix (overflow clipping and the 200 ms settle)
   came across with the copy. The spike's log shows one resize per connect.
