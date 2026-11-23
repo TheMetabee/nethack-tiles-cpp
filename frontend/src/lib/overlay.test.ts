@@ -100,6 +100,28 @@ describe("paintOverlay", () => {
     );
   });
 
+  it("snaps fractional cells to device pixels so neighbours meet without a seam", () => {
+    const ctx = fakeContext();
+    // 9.37px cells on a 1.25x display: unsnapped, every tile edge would land
+    // mid-pixel and be anti-aliased into a dark line.
+    const ratio = 1.25;
+    paintOverlay(ctx as never, target({ cellWidth: 9.37, cellHeight: 18.6, pixelRatio: ratio }), [
+      { row: 0, col: 2, tile: 0, flags: noFlags, ch: "." },
+      { row: 0, col: 3, tile: 0, flags: noFlags, ch: "." },
+      { row: 1, col: 2, tile: 0, flags: noFlags, ch: "." },
+    ]);
+
+    const rects = ctx.drawImage.mock.calls.map((c: unknown[]) => c.slice(5) as number[]);
+    for (const [x, y, w, h] of rects) {
+      for (const v of [x, y, x + w, y + h]) {
+        expect(Math.abs(v * ratio - Math.round(v * ratio))).toBeLessThan(1e-9);
+      }
+    }
+    const [left, right, below] = rects;
+    expect(left[0] + left[2]).toBeCloseTo(right[0], 9);
+    expect(left[1] + left[3]).toBeCloseTo(below[1], 9);
+  });
+
   it("draws the tile at the origin for cell (0, 0) and tile 0", () => {
     const ctx = fakeContext();
     paintOverlay(ctx as never, target(), [

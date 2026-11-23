@@ -243,6 +243,7 @@ export function GameTerminal({
           widthPx: screen.width,
           heightPx: screen.height,
           pixelPerfect: displayRef.current.pixelPerfect,
+          pixelRatio: dpr,
         },
         grid.entries(),
         port.cursor(),

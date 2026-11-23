@@ -25,6 +25,13 @@ export interface OverlayTarget {
    * width and height controls are for.
    */
   pixelPerfect?: boolean;
+  /**
+   * Device pixels per CSS pixel (the canvas transform's scale). Cell edges are
+   * snapped to whole device pixels so neighbouring tiles meet exactly; without
+   * it a fractional cell size leaves each tile edge part-covering a pixel,
+   * which the canvas anti-aliases into a thin seam of the terminal behind.
+   */
+  pixelRatio?: number;
 }
 
 export interface OverlayTile {
@@ -61,6 +68,20 @@ export function paintOverlay(
 ): PaintReport {
   const report: PaintReport = { drawn: 0, missing: 0, maxIndex: -1 };
   const { manifest, cellWidth, cellHeight, widthPx, heightPx } = target;
+  const ratio = target.pixelRatio && target.pixelRatio > 0 ? target.pixelRatio : 1;
+  /** Rounds a CSS-pixel coordinate to the nearest device pixel boundary. */
+  const snap = (v: number) => Math.round(v * ratio) / ratio;
+  /** A cell's box with every edge on a device pixel, shared with its neighbours. */
+  const cellBox = (row: number, col: number) => {
+    const left = snap(col * cellWidth);
+    const top = snap(row * cellHeight);
+    return {
+      x: left,
+      y: top,
+      w: snap((col + 1) * cellWidth) - left,
+      h: snap((row + 1) * cellHeight) - top,
+    };
+  };
   let cursorCovered = false;
 
   ctx.clearRect(0, 0, widthPx, heightPx);
@@ -70,16 +91,15 @@ export function paintOverlay(
 
   for (const tile of tiles) {
     report.maxIndex = Math.max(report.maxIndex, tile.tile);
-    const x = tile.col * cellWidth;
-    const y = tile.row * cellHeight;
-    if (x >= widthPx || y >= heightPx || x + cellWidth <= 0 || y + cellHeight <= 0) {
+    const { x, y, w, h } = cellBox(tile.row, tile.col);
+    if (x >= widthPx || y >= heightPx || x + w <= 0 || y + h <= 0) {
       continue;
     }
 
     const src = tileRect(manifest, tile.tile);
     if (!src) {
       report.missing++;
-      drawMissingTile(ctx, x, y, cellWidth, cellHeight);
+      drawMissingTile(ctx, x, y, w, h);
       continue;
     }
     report.drawn++;
@@ -87,10 +107,10 @@ export function paintOverlay(
     // How many whole tiles fit in the cell; 0 means the cell is too small for
     // even one, so stretching is the only option that stays inside the cell.
     const whole = target.pixelPerfect
-      ? Math.floor(Math.min(cellWidth / src.width, cellHeight / src.height))
+      ? Math.floor(Math.min(w / src.width, h / src.height))
       : 0;
-    const drawWidth = whole >= 1 ? src.width * whole : cellWidth;
-    const drawHeight = whole >= 1 ? src.height * whole : cellHeight;
+    const drawWidth = whole >= 1 ? src.width * whole : w;
+    const drawHeight = whole >= 1 ? src.height * whole : h;
 
     ctx.drawImage(
       target.sheet,
@@ -98,8 +118,8 @@ export function paintOverlay(
       src.y,
       src.width,
       src.height,
-      x + (cellWidth - drawWidth) / 2,
-      y + (cellHeight - drawHeight) / 2,
+      x + snap((w - drawWidth) / 2),
+      y + snap((h - drawHeight) / 2),
       drawWidth,
       drawHeight,
     );
@@ -108,11 +128,11 @@ export function paintOverlay(
       ctx.fillStyle = tile.flags.invisible
         ? "rgba(255, 255, 255, 0.25)"
         : "rgba(120, 180, 255, 0.30)";
-      ctx.fillRect(x, y, cellWidth, cellHeight);
+      ctx.fillRect(x, y, w, h);
     }
 
     if (tile.flags.pet) {
-      drawPetHeart(ctx, x, y, cellWidth, cellHeight);
+      drawPetHeart(ctx, x, y, w, h);
     }
 
     if (cursor && cursor.row === tile.row && cursor.col === tile.col) {
@@ -121,7 +141,8 @@ export function paintOverlay(
   }
 
   if (cursor && cursorCovered) {
-    drawCursor(ctx, cursor.col * cellWidth, cursor.row * cellHeight, cellWidth, cellHeight);
+    const box = cellBox(cursor.row, cursor.col);
+    drawCursor(ctx, box.x, box.y, box.w, box.h);
   }
 
   return report;
